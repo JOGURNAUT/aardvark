@@ -38,31 +38,78 @@ const emptyRun = (): RunState => ({
   unknownEvents: 0,
 });
 
-// Each of these exercises a different one of the six evaluation categories, so
-// the empty state doubles as the demo. The second one is the interesting one:
-// the honest answer is that it cannot be answered from what is findable.
+// The stage names are the loop's; the second line is the design's. Both are
+// shown because "fetch" says what the code is doing and "hauling logs" says
+// how long to expect to wait.
+const NICK: Record<Stage, string> = {
+  plan: "surveying the stream",
+  search: "scouting the banks",
+  fetch: "hauling logs",
+  select: "gnawing it down",
+  answer: "building the dam",
+};
+
 const EXAMPLES = [
   {
     q: "How did the EU AI Act's definition of a high-risk system change between the 2021 proposal and the final text?",
-    why: "multi-hop, needs two documents",
+    why: "multi-hop · needs two documents",
   },
   {
     q: "What was the exact internal headcount of OpenAI's alignment team in March 2023?",
-    why: "insufficient evidence, should refuse rather than guess",
+    why: "insufficient evidence · should refuse rather than guess",
   },
   {
     q: "How many people died in the 1970 Ancash earthquake?",
-    why: "sources disagree, should say so and cite both",
+    why: "sources disagree · should say so and cite both",
   },
 ];
 
+// A page that loaded and yielded nothing. The server sends ok and chars
+// separately, so this is derived rather than reported, and it is the single
+// most useful thing in the trace: it is the usual reason an answer is thin.
+type PageKind = "ok" | "hollow" | "failed";
+
+function kindOf(p: FetchedPage): PageKind {
+  if (p.ok === false) return "failed";
+  if (p.chars != null && p.chars === 0) return "hollow";
+  return "ok";
+}
+
+const BAR_MAX = 128;
+
+function barWidth(chars: number | undefined): number {
+  if (!chars || chars <= 0) return 0;
+  // Log scale: a 40k-character page should not make a 2k one invisible.
+  return Math.max(3, Math.round((Math.log10(chars) / Math.log10(20000)) * BAR_MAX));
+}
+
+function splitUrl(p: FetchedPage): { host: string; path: string } {
+  try {
+    const u = new URL(p.url);
+    return { host: p.domain || u.hostname.replace(/^www\./, ""), path: u.pathname + u.search };
+  } catch {
+    return { host: p.domain || p.url, path: "" };
+  }
+}
+
+const Logo = ({ size = 30, live = false }: { size?: number; live?: boolean }) => (
+  <svg width={size} height={size} viewBox="0 0 48 48" fill="none" aria-hidden="true">
+    <circle cx="24" cy="24" r="4" stroke="#E0A064" strokeWidth="2.5" />
+    <circle cx="24" cy="24" r="9" stroke="#E0A064" strokeWidth="2.5" />
+    <circle className={live ? "bv-pulse" : undefined} cx="24" cy="24" r="14"
+            stroke="#E0A064" strokeWidth="2.5" />
+    <circle cx="24" cy="24" r="19" stroke={live ? "#3D352B" : "#E0A064"} strokeWidth="2.5" />
+    <circle cx="24" cy="24" r="23" stroke={live ? "#3D352B" : "#E0A064"} strokeWidth="2" />
+    <path d="M30 24 L48 13 L48 35 Z" fill="#15120E" />
+  </svg>
+);
+
 /**
- * Renders [1] and [2,3] markers as links into the snippet list.
+ * Renders [1] and [2,3] markers as links into the evidence list.
  *
- * Deliberately done here and not in the model's output: the server already
- * strips markers that point at nothing, so any marker reaching this point is
- * known to resolve. If one does not, it renders as plain text rather than a
- * dead link, because a broken citation should look broken.
+ * The server already strips markers that point at nothing, so any marker here
+ * is known to resolve. One that does not renders in the failure colour rather
+ * than as a dead link, because a broken citation should look broken.
  */
 function AnswerText({ text, citations, streaming }:
                     { text: string; citations: Citation[]; streaming: boolean }) {
@@ -74,55 +121,90 @@ function AnswerText({ text, citations, streaming }:
       {parts.map((part, i) => {
         const m = part.match(/^\[(\d+(?:\s*,\s*\d+)*)\]$/);
         if (!m) return <span key={i}>{part}</span>;
-        const markers = m[1].split(",").map((n) => parseInt(n.trim(), 10));
         return (
-          <sup key={i} className="cites">
-            [
-            {markers.map((n, j) => {
+          <span key={i}>
+            {m[1].split(",").map((raw) => {
+              const n = parseInt(raw.trim(), 10);
               const c = byMarker.get(n);
-              return (
-                <span key={n}>
-                  {j > 0 && ","}
-                  {c ? (
-                    <a href={c.url} target="_blank" rel="noreferrer"
-                       title={`${c.title} - ${c.domain}`}>
-                      {n}
-                    </a>
-                  ) : (
-                    <span className="dead-cite">{n}</span>
-                  )}
-                </span>
+              return c ? (
+                <a key={n} className="cite" href={`#ev-${n}`} title={`${c.title} - ${c.domain}`}>
+                  {n}
+                </a>
+              ) : (
+                <span key={n} className="cite dead">{n}</span>
               );
             })}
-            ]
-          </sup>
+          </span>
         );
       })}
     </div>
   );
 }
 
+/** The evidence list. Exported so it can be render-tested against a payload
+ *  shaped like the wire, which is where the black-screen crash lived: the
+ *  reducer never touched the missing field, only the render did. */
+export function Evidence({ snippets }: { snippets: Snippet[] }) {
+  const domains = new Set(snippets.map((s) => s.domain).filter(Boolean));
+  return (
+    <section className="evidence" aria-labelledby="evidence-h">
+      <div className="evidence-head">
+        <h2 id="evidence-h">Evidence</h2>
+        <span className="mono">
+          {snippets.length} snippets · {domains.size} domains
+        </span>
+      </div>
+      <ol>
+        {snippets.map((s, i) => {
+          const n = s.idx ?? i + 1;
+          return (
+            <li key={i} id={`ev-${n}`}>
+              <span className="n">{n}</span>
+              <div className="body">
+                <div className="meta">
+                  <span>{s.domain}</span>
+                  {s.score != null && (
+                    <span className="score">
+                      <span className="bar">
+                        <i style={{ width: `${Math.round(s.score * 64)}px` }} />
+                      </span>
+                      <b>{s.score.toFixed(2)}</b>
+                    </span>
+                  )}
+                  {s.chars != null && <span>{s.chars.toLocaleString("en-US")} chars</span>}
+                </div>
+                <a className="title" href={s.url} target="_blank" rel="noreferrer">
+                  {s.title || s.url}
+                </a>
+                {s.text && <p className="snip">{s.text.slice(0, 260)}</p>}
+              </div>
+            </li>
+          );
+        })}
+      </ol>
+    </section>
+  );
+}
+
 export default function App() {
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [query, setQuery] = useState("");
+  const [asked, setAsked] = useState("");
   const [run, setRun] = useState<RunState>(emptyRun);
   const [busy, setBusy] = useState(false);
   const [started, setStarted] = useState(false);
   const [elapsed, setElapsed] = useState(0);
   const [bootError, setBootError] = useState<string | null>(null);
   const abortRef = useRef<AbortController | null>(null);
-  const boxRef = useRef<HTMLTextAreaElement | null>(null);
 
   useEffect(() => {
     createSession("web").then(setSessionId).catch((e) => setBootError(String(e)));
   }, []);
 
-  // Abort any in-flight run when the component goes away, so a navigation does
-  // not leave the server streaming tokens into a closed connection.
   useEffect(() => () => abortRef.current?.abort(), []);
 
-  // A research turn takes tens of seconds. Without a clock the page looks hung
-  // during fetch, which is the longest stage and the one with nothing to show.
+  // A research turn takes tens of seconds and fetch is the long silent one.
+  // Without a clock the page looks hung exactly where it is working hardest.
   useEffect(() => {
     if (!busy) return;
     const t0 = Date.now();
@@ -140,6 +222,7 @@ export default function App() {
     abortRef.current = controller;
     setBusy(true);
     setStarted(true);
+    setAsked(q);
     setElapsed(0);
     setRun({ ...emptyRun(), stages: { ...emptyRun().stages, plan: "running" } });
 
@@ -159,226 +242,321 @@ export default function App() {
     }
   }, [sessionId, query, busy]);
 
-  const useExample = (q: string) => {
-    setQuery(q);
-    boxRef.current?.focus();
-    void submit(q);
+  const reset = () => {
+    abortRef.current?.abort();
+    setStarted(false);
+    setAsked("");
+    setQuery("");
+    setRun(emptyRun());
   };
+
+  const activeStage = STAGES.find((s) => run.stages[s] === "running");
 
   return (
     <div className="app">
-      <header>
-        <h1>Beaver</h1>
-        <span className="sub">deep research agent</span>
-        <span className="spacer" />
-        {busy && <span className="sub">{elapsed}s</span>}
-      </header>
-
-      {bootError && (
-        <div className="error">
-          <span className="stage">session</span>
-          <span className="msg">{bootError}</span>
-        </div>
-      )}
-
-      <div className="composer">
-        <textarea
-          ref={boxRef}
-          value={query}
-          placeholder="Ask something that needs more than one source."
-          onChange={(e) => setQuery(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) void submit();
-          }}
-          disabled={!sessionId}
-        />
-        <div className="actions">
-          <button className="btn-primary" onClick={() => void submit()}
-                  disabled={busy || !sessionId || !query.trim()}>
-            {busy ? "Researching" : "Ask"}
-          </button>
-          {busy && <button className="btn-ghost" onClick={stop}>Stop</button>}
-          <span className="spacer" />
-          <span className="hint">Ctrl + Enter</span>
-        </div>
-      </div>
-
-      {!started && (
-        <section className="examples">
-          <h2>Try one</h2>
-          {EXAMPLES.map((ex) => (
-            <button key={ex.q} onClick={() => useExample(ex.q)} disabled={!sessionId}>
-              {ex.q}
-              <span className="why">{ex.why}</span>
-            </button>
-          ))}
-        </section>
-      )}
-
-      {started && (
-        <ErrorBoundary label="trace">
-          <StageTrail run={run} />
-          <Trace run={run} />
-        </ErrorBoundary>
-      )}
-
-      {run.errors.map((e, i) => (
-        <div className="error" key={i}>
-          <span className="stage">{e.stage}</span>
-          <span className="msg">{e.message}</span>
-        </div>
-      ))}
-
-      {run.answer && (
-        <ErrorBoundary label="answer">
-          <AnswerText text={run.answer} citations={run.citations}
-                      streaming={busy && run.stages.answer === "running"} />
-        </ErrorBoundary>
-      )}
-
-      {run.latencyMs !== null && (
-        <div className="latency">
-          <span className="total">{(run.latencyMs / 1000).toFixed(1)}s total</span>
-          {Object.entries(run.stageLatencies).map(([s, secs]) => (
-            <span key={s} className="chip">{s} {Math.round(secs * 1000)}ms</span>
-          ))}
-          {run.unknownEvents > 0 && (
-            <span className="chip warn">{run.unknownEvents} unrecognised events</span>
+      <div className="col">
+        <header className="bar">
+          <span className="brand">
+            <Logo live={busy} />
+            <span className="word">Beaver</span>
+          </span>
+          {busy ? (
+            <button className="pill-ghost" onClick={stop}>Stop</button>
+          ) : started ? (
+            <button className="pill-ghost" onClick={reset}>New question</button>
+          ) : (
+            <span className="mono">deep research agent</span>
           )}
-        </div>
-      )}
+        </header>
 
-      {run.snippets.length > 0 && (
-        <ErrorBoundary label="evidence">
-          <Evidence snippets={run.snippets} />
-        </ErrorBoundary>
-      )}
+        {bootError && (
+          <div className="error">
+            <span className="stage">session</span>
+            <span className="msg">{bootError}</span>
+          </div>
+        )}
+
+        {!started ? (
+          <main className="ask">
+            <h1 className="hero">
+              One question.
+              <br />
+              <em>Every log it gnawed through.</em>
+            </h1>
+
+            <div className="field">
+              <label className="eyebrow" htmlFor="q">Your question</label>
+              <textarea
+                id="q"
+                rows={3}
+                value={query}
+                placeholder="What do you want to know? Ask it the way you'd ask a librarian."
+                onChange={(e) => setQuery(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) void submit();
+                }}
+                disabled={!sessionId}
+              />
+              <div className="field-foot">
+                <span className="mono">plan → search → fetch → select → answer · 20–60 s</span>
+                <button className="pill" onClick={() => void submit()}
+                        disabled={!sessionId || !query.trim()}>
+                  Research
+                  <svg width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden="true">
+                    <path d="M2 7 H12 M8 3 L12 7 L8 11" stroke="#15120E" strokeWidth="1.8" />
+                  </svg>
+                </button>
+              </div>
+            </div>
+
+            <p className="standfirst">
+              Beaver shows every query it runs and every page it reads, including the ones
+              that come back hollow, so you can see what the answer stands on.
+            </p>
+
+            <div className="suggest">
+              {EXAMPLES.map((ex) => (
+                <button key={ex.q} onClick={() => void submit(ex.q)} disabled={!sessionId}>
+                  {ex.q}
+                  <span className="why">{ex.why}</span>
+                </button>
+              ))}
+            </div>
+          </main>
+        ) : (
+          <main>
+            <section className="question">
+              <div className="eyebrow">Question</div>
+              <h1>{asked}</h1>
+              <div className="mono">
+                {run.latencyMs !== null
+                  ? `Answered in ${(run.latencyMs / 1000).toFixed(1)} s · ${run.citations.length} sources cited`
+                  : `${elapsed} s elapsed · usually 20–60 s`}
+              </div>
+            </section>
+
+            {busy && activeStage && (
+              <div className="status">
+                <Logo size={56} live />
+                <div>
+                  <div className="now">
+                    <em>{NICK[activeStage]}</em>
+                    {activeStage === "fetch" && run.pagesFetched > 0
+                      ? ` — reading ${run.pagesFetched} pages`
+                      : ""}
+                  </div>
+                  <div className="sub">
+                    Stage {STAGES.indexOf(activeStage) + 1} of 5 · {elapsed} s elapsed
+                  </div>
+                </div>
+              </div>
+            )}
+
+            <ErrorBoundary label="trace">
+              <Trace run={run} />
+            </ErrorBoundary>
+
+            {run.errors.map((e, i) => (
+              <div className="error" key={i}>
+                <span className="stage">{e.stage}</span>
+                <span className="msg">{e.message}</span>
+              </div>
+            ))}
+
+            {run.answer && (
+              <ErrorBoundary label="answer">
+                <section aria-labelledby="answer-h">
+                  <div className="answer-head">
+                    <h2 id="answer-h">Answer</h2>
+                    <button className="textbtn"
+                            onClick={() => void navigator.clipboard?.writeText(run.answer)}>
+                      Copy
+                    </button>
+                  </div>
+                  <AnswerText text={run.answer} citations={run.citations}
+                              streaming={busy && run.stages.answer === "running"} />
+                </section>
+              </ErrorBoundary>
+            )}
+
+            {run.snippets.length > 0 && (
+              <ErrorBoundary label="evidence">
+                <Evidence snippets={run.snippets} />
+              </ErrorBoundary>
+            )}
+
+            {run.latencyMs !== null && (
+              <footer className="note-foot">
+                Beaver builds each answer only from the snippets listed above.
+                {Object.entries(run.stageLatencies).map(([s, secs]) => (
+                  <span key={s}> · {s} {Math.round(secs * 1000)} ms</span>
+                ))}
+                {run.unknownEvents > 0 && ` · ${run.unknownEvents} unrecognised events`}
+              </footer>
+            )}
+          </main>
+        )}
+      </div>
     </div>
   );
 }
 
 /**
- * What the agent actually did, filling in live.
+ * The five stages as a timeline, each filling in with what it actually found.
  *
- * This is the part worth watching, and it is the part a progress bar throws
- * away. The five dots above say which stage is running; this says which
- * queries were chosen, which pages came back empty, and what each snippet
- * scored. A fetch that returns 0 characters is the single most common reason
- * an answer is thin, and it is invisible unless the per-page result is shown.
+ * The bead column is the only progress indicator; everything to the right of
+ * it is evidence. A page that returned 200 and no extractable text shows as
+ * "hollow", which is derived here rather than reported, because the server
+ * sends `ok` and `chars` separately and neither alone says it.
  */
 function Trace({ run }: { run: RunState }) {
-  const nothingYet = !run.strategy && run.pages.length === 0 && run.snippets.length === 0;
-  if (nothingYet) return null;
+  const hollow = run.pages.filter((p) => kindOf(p) === "hollow");
+  const failed = run.pages.filter((p) => kindOf(p) === "failed");
 
   return (
-    <section className="trace">
-      {run.strategy && (
-        <div className="trace-group">
-          <span className="trace-stage">plan</span>
-          <div className="trace-body">
-            <p className="strategy">{run.strategy}</p>
-            <div className="chips">
-              {run.plan.map((q) => <span className="chip-q" key={q}>{q}</span>)}
+    <ol className="steps">
+      {STAGES.map((s, i) => {
+        const state = run.stages[s];
+        const secs = run.stageLatencies[s];
+        return (
+          <li className={`step ${state}`} key={s}>
+            <div className="rail">
+              <span className="bead">
+                {state === "done" && (
+                  <svg width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden="true">
+                    <path d="M3 7.2 L6 10 L11 4" stroke="#15120E" strokeWidth="2" />
+                  </svg>
+                )}
+                {state === "running" && (
+                  <svg className="bv-spin" width="14" height="14" viewBox="0 0 14 14"
+                       fill="none" aria-hidden="true">
+                    <path d="M7 1.5 A5.5 5.5 0 0 1 12.5 7" stroke="#E0A064" strokeWidth="2" />
+                  </svg>
+                )}
+              </span>
+              {i < STAGES.length - 1 && <span className="wire" />}
             </div>
-          </div>
-        </div>
-      )}
 
-      {run.searchResults > 0 && (
-        <div className="trace-group">
-          <span className="trace-stage">search</span>
-          <div className="trace-body">
-            <p className="muted">{run.searchResults} unique results after de-duplicating by URL</p>
-          </div>
-        </div>
-      )}
-
-      {run.pages.length > 0 && (
-        <div className="trace-group">
-          <span className="trace-stage">fetch</span>
-          <div className="trace-body">
-            <p className="muted">
-              {run.pages.filter((p) => p.ok !== false).length} of {run.pages.length} extracted
-            </p>
-            {run.pages.map((p, i) => (
-              <div className={p.ok === false ? "row bad" : "row"} key={i}>
-                <span className="mark">{p.ok === false ? "fail" : "ok"}</span>
-                <span className="meta">{p.chars != null ? `${p.chars} chars` : ""}</span>
-                <a href={p.url} target="_blank" rel="noreferrer">{p.domain || p.url}</a>
+            <div className="step-body">
+              <div className="step-head">
+                <span className="left">
+                  <span className="name">{s}</span>
+                  <span className="nick">{NICK[s]}</span>
+                </span>
+                <span className="t">
+                  {secs != null
+                    ? `${secs.toFixed(1)} s`
+                    : state === "running"
+                      ? "working"
+                      : state === "idle"
+                        ? "waiting"
+                        : ""}
+                </span>
               </div>
-            ))}
-          </div>
-        </div>
-      )}
 
-      {run.snippets.length > 0 && (
-        <div className="trace-group">
-          <span className="trace-stage">select</span>
-          <div className="trace-body">
-            <p className="muted">
-              {run.snippets.length} snippets kept, at most 2 per domain
-            </p>
-            {run.snippets.map((s, i) => (
-              <div className="row" key={i}>
-                <span className="mark idx">[{s.idx ?? i + 1}]</span>
-                <span className="meta">{s.score != null ? s.score.toFixed(3) : ""}</span>
-                <span className="title">{s.title || s.url}</span>
-                <span className="domain">{s.domain}</span>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-    </section>
-  );
-}
+              {s === "plan" && run.plan.length > 0 && (
+                <ol className="subqs">
+                  {run.plan.map((q) => <li key={q}>{q}</li>)}
+                </ol>
+              )}
 
-/** The evidence list. Exported so it can be render-tested against a payload
- *  shaped like the wire, which is where the black-screen crash lived: the
- *  reducer never touched the missing field, only the render did. */
-export function Evidence({ snippets }: { snippets: Snippet[] }) {
-  return (
-      <section className="snippets">
-        <h2>Evidence &middot; {snippets.length} snippets</h2>
-        {snippets.map((s, i) => (
-          <article key={i}>
-            <span className="num">{i + 1}</span>
-            <span className="head">
-              <a href={s.url} target="_blank" rel="noreferrer">{s.title || s.url}</a>
-              <span className="domain">{s.domain}</span>
-            </span>
-            {/* select_done sends `chars`, a length, not the snippet text.
-                Showing the length is honest; the text is not on the wire. */}
-            <p>
-              {s.chars != null && `${s.chars.toLocaleString()} characters`}
-              {s.score != null && ` · relevance ${s.score.toFixed(3)}`}
-              {s.text && ` · ${s.text.slice(0, 220)}`}
-            </p>
-          </article>
-        ))}
-      </section>
-  );
-}
+              {s === "search" && run.searchResults > 0 && (
+                <div className="qrow">
+                  <span>{run.searchResults} unique results</span>
+                  <span className="mono">de-duplicated by URL</span>
+                </div>
+              )}
 
-function StageTrail({ run }: { run: RunState }) {
-  return (
-    <ol className="trail">
-      {STAGES.map((s) => (
-        <li key={s} className={run.stages[s]}>
-          <span className="dot" />
-          <span className="name">{s}</span>
-          {s === "plan" && run.plan.length > 0 && (
-            <span className="detail">{run.plan.length}</span>
-          )}
-          {s === "fetch" && run.pagesFetched > 0 && (
-            <span className="detail">{run.pagesFetched}</span>
-          )}
-          {s === "select" && run.snippets.length > 0 && (
-            <span className="detail">{run.snippets.length}</span>
-          )}
-        </li>
-      ))}
+              {s === "fetch" && run.pages.length > 0 && (
+                <>
+                  <div className="ptable">
+                    <div className="thead">
+                      <span>Status</span>
+                      <span>Page</span>
+                      <span>Text extracted</span>
+                      <span className="r">Chars</span>
+                    </div>
+                    {run.pages.map((p, k) => {
+                      const kind = kindOf(p);
+                      const { host, path } = splitUrl(p);
+                      return (
+                        <div className={`prow ${kind}`} key={k}>
+                          <span className="st">
+                            <Dot kind={kind} />
+                            {kind === "failed" ? "failed" : kind === "hollow" ? "hollow" : "200"}
+                          </span>
+                          <span className="where">
+                            <a href={p.url} target="_blank" rel="noreferrer">{host}</a>
+                            <span className="path">{path}</span>
+                          </span>
+                          <span className="bar">
+                            <i style={{ width: `${barWidth(p.chars)}px` }} />
+                          </span>
+                          <span className="chars">
+                            {kind === "failed"
+                              ? "refused"
+                              : p.chars != null
+                                ? p.chars.toLocaleString("en-US")
+                                : ""}
+                          </span>
+                        </div>
+                      );
+                    })}
+                  </div>
+
+                  {(hollow.length > 0 || failed.length > 0) && (
+                    <div className="note">
+                      <svg width="16" height="16" viewBox="0 0 18 18" fill="none" aria-hidden="true">
+                        <circle cx="9" cy="9" r="7" stroke="#E0A064" strokeWidth="2" />
+                      </svg>
+                      <p>
+                        <strong>
+                          {hollow.length} of {run.pages.length} pages came back hollow
+                        </strong>
+                        {" — they loaded, but gave no readable text"}
+                        {hollow.length > 0 && `: ${hollow.map((p) => p.domain || p.url).join(", ")}`}
+                        {failed.length > 0 &&
+                          `. ${failed.length} more refused the request: ${failed.map((p) => p.domain || p.url).join(", ")}`}
+                        {`. This answer rests on the other ${run.pages.length - hollow.length - failed.length} pages.`}
+                      </p>
+                    </div>
+                  )}
+                </>
+              )}
+
+              {s === "select" && run.snippets.length > 0 && (
+                <div className="qrow">
+                  <span>{run.snippets.length} snippets kept</span>
+                  <span className="mono">at most 2 per domain</span>
+                </div>
+              )}
+            </div>
+          </li>
+        );
+      })}
     </ol>
+  );
+}
+
+function Dot({ kind }: { kind: PageKind }) {
+  if (kind === "failed") {
+    return (
+      <svg width="10" height="10" viewBox="0 0 10 10" fill="none" aria-hidden="true">
+        <path d="M1.5 1.5 L8.5 8.5 M8.5 1.5 L1.5 8.5" stroke="#D97A63" strokeWidth="1.8" />
+      </svg>
+    );
+  }
+  if (kind === "hollow") {
+    return (
+      <svg width="10" height="10" viewBox="0 0 10 10" fill="none" aria-hidden="true">
+        <circle cx="5" cy="5" r="3.8" stroke="#E0A064" strokeWidth="1.6" />
+      </svg>
+    );
+  }
+  return (
+    <svg width="10" height="10" viewBox="0 0 10 10" aria-hidden="true">
+      <circle cx="5" cy="5" r="4" fill="#B5AA98" />
+    </svg>
   );
 }
 

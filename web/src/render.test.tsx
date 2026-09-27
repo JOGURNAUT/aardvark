@@ -28,8 +28,9 @@ describe("Evidence", () => {
     const html = renderToStaticMarkup(<Evidence snippets={[wire()]} />);
     expect(html).toContain("Annex III of the AI Act");
     expect(html).toContain("eur-lex.europa.eu");
-    expect(html).toContain("1,284 characters");
-    expect(html).toContain("0.847");
+    expect(html).toContain("1,284 chars");
+    // The design renders the score to two decimals, not three.
+    expect(html).toContain("0.85");
   });
 
   it("does not throw when the snippet has no text field", () => {
