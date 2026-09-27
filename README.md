@@ -51,6 +51,72 @@ python -m pytest tests/ -q
 
 ---
 
+## Web front end (React + TypeScript)
+
+A third interface over the same `agent/loop.py`, after Streamlit and Gradio.
+
+```bash
+# terminal 1 - the API
+pip install -r requirements-api.txt
+uvicorn api.server:app --port 8000 --reload
+
+# terminal 2 - the dev server (proxies /api to 8000)
+cd web && npm install && npm run dev      # http://localhost:5173
+```
+
+In the container there is no second process: `npm run build` output is copied
+into the image and FastAPI serves it alongside the API on one port.
+
+### Why it exists
+
+The loop has always claimed to be decoupled from its UI. Two Python front ends
+assert that; one in another language tests it. Writing this surfaced two places
+where the claim was softer than stated:
+
+- `answer_done` re-emits the whole answer after the citation guard has run, so
+  a consumer that appends tokens and then appends the final answer prints it
+  twice. Streamlit never hit this because it rebuilds from state on each rerun.
+  **Not fixed in the loop** — the contract is reasonable and changing it would
+  break the other two front ends. The reducer in `App.tsx` replaces rather than
+  appends, and says why. It is a documented sharp edge, not a repaired one.
+- The stream had no way to say "this run was abandoned". A turn with no
+  `answer_done` meant either a crash or a closed tab, and nothing distinguished
+  them in the audit trail. **Partly addressed**: `api/server.py` now logs the
+  two cases differently. The SQLite audit trail still cannot tell them apart.
+
+### Three decisions worth the space
+
+**SSE over `fetch`, not `EventSource`.** `EventSource` is the obvious tool and
+the wrong one: it only issues GET, so the query rides in the URL, and closing it
+does not reliably reach the server. `fetch` gives a request body and an
+`AbortController`. The cost is reimplementing the wire format in `web/src/api.ts`,
+including the fact that a chunk boundary can land in the middle of a JSON object.
+
+**Cancellation is deterministic, and getting there took a rewrite.** The first
+version was a sync generator handed to `StreamingResponse`. Starlette drives
+that with `iterate_in_threadpool`, which stops pulling when the client goes but
+never calls `.close()`, so `GeneratorExit` arrives whenever garbage collection
+decides, and the provider response stays open until then. The stream is now an
+async generator that drives the sync one by hand and closes it in a `finally`.
+Starlette does call `aclose()` on disconnect, and `finally` runs on
+cancellation. `tests/test_api.py` asserts it at the generator level rather than
+through `TestClient`, which buffers the whole body and cannot express a
+disconnect at all.
+
+**Events are forwarded, not mapped.** The server re-serialises whatever the loop
+yields. A new event type reaches the browser without a change to `api/server.py`,
+and `web/src/App.tsx` counts the ones it does not recognise instead of dropping
+them, so drift between the two shows up in the UI rather than as silence.
+
+### Known limitations
+
+- `web/src/types.ts` is hand-written against a docstring in `loop.py`. It can
+  drift; the unknown-event counter is what makes a drift visible, not a fix.
+- No frontend test runner. `reduce()` in `App.tsx` is exported and pure
+  specifically so one can be added without restructuring anything.
+- One session per page load, created on mount. There is no session list in this
+  UI yet, though `/api/sessions` returns one.
+
 ## Part 1 - Design note
 
 ### Target user & problem

@@ -1,11 +1,11 @@
 name: tests
 
-# Runs the unit suite in tests/ only.
+# Runs the unit suite in tests/ and typechecks + builds the React front end.
 #
 # smoke_test.py and eval/run_eval.py are deliberately not here: both call Groq,
 # Gemini and Tavily, so they need live API keys and cost quota on every push.
-# The unit tests stub the embedder and the tokenizer, so they need no secrets
-# and no network.
+# The unit tests stub the embedder, the tokenizer and the agent loop, so they
+# need no secrets and no network.
 
 on:
   push:
@@ -31,7 +31,32 @@ jobs:
         run: pip install torch --index-url https://download.pytorch.org/whl/cpu
 
       - name: Install dependencies
-        run: pip install -r requirements.txt -r requirements-dev.txt
+        run: pip install -r requirements.txt -r requirements-dev.txt -r requirements-api.txt
 
       - name: Run unit tests
         run: python -m pytest tests/ -q
+
+  web:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - run: npm ci
+
+      # Typechecked separately from the build so a type error reports as a type
+      # error. `vite build` runs tsc as well, but a failure there buries which
+      # of the two stages actually broke.
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Build
+        run: npm run build

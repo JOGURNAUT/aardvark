@@ -13,3 +13,7 @@ eval/results/
 # build artifact + runtime
 *.zip
 README.pdf
+
+# React front end
+web/node_modules/
+web/dist/

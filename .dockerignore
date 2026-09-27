@@ -34,3 +34,7 @@ build/
 .idea
 .DS_Store
 Thumbs.db
+
+# The web build happens in its own stage; the host's copies are stale by definition.
+web/node_modules
+web/dist

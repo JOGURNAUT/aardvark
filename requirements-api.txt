@@ -1,0 +1,10 @@
+# HTTP front end (api/server.py) + the React app it serves.
+#
+# Kept separate from requirements.txt the same way requirements-gradio.txt is:
+# the Streamlit image does not need a second web server. The container that
+# serves the React build installs requirements.txt plus this file.
+#
+#   pip install -r requirements.txt -r requirements-api.txt
+#   uvicorn api.server:app --port 8000 --reload
+fastapi>=0.115
+uvicorn[standard]>=0.32
