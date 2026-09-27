@@ -17,3 +17,6 @@ README.pdf
 # React front end
 web/node_modules/
 web/dist/
+
+# Hand labels are personal judgements, not results. Tracked deliberately:
+# extract/report are reproducible, the labels in between are not.

@@ -117,6 +117,43 @@ them, so drift between the two shows up in the UI rather than as silence.
 - One session per page load, created on mount. There is no session list in this
   UI yet, though `/api/sessions` returns one.
 
+## Judge calibration
+
+The headline numbers come from a model grading another model. Using a different
+model family removes the self-grading bias; it does not make the judge correct.
+`eval/calibrate.py` measures how far the judge is from a person on the same
+cases, so the numbers can be read with that distance beside them.
+
+```bash
+python eval/calibrate.py extract eval/results/<run>/results.json
+python eval/calibrate.py label     # one case at a time, saves after each
+python eval/calibrate.py report
+```
+
+The report gives, per metric: n, agreement rate, mean absolute difference,
+Cohen's kappa, and a **signed** bias, plus the ten largest disagreements.
+
+Four decisions in it are worth stating, because each one changes the number:
+
+- **The judge's score is hidden while labelling.** Seeing it first turns the
+  task into agreeing with a number, which is a much easier question than the
+  one being asked.
+- **A continuous metric counts as agreeing within 0.25.** That is a quarter of
+  the scale and it is a choice, not a standard. The report prints it.
+- **Kappa, not raw agreement.** With nine faithful answers in eleven, a judge
+  that says "faithful" every time scores 0.82 while carrying no information.
+  Kappa removes that floor, and returns `None` rather than `0` when every label
+  falls in one class, because chance agreement is then 1.0 and the statistic is
+  0/0. A small skewed sample failing to support a statistic is a fact about the
+  sample, not a zero.
+- **The bias is signed.** A judge that is consistently generous and one that is
+  merely noisy produce the same mean absolute difference. Only one of the two
+  is fixable by moving a threshold.
+
+**No labels are committed.** `extract` and `report` work; the labels in between
+have to be someone's actual judgement, and there is no number to quote until
+they exist.
+
 ## Part 1 - Design note
 
 ### Target user & problem
