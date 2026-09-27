@@ -17,9 +17,17 @@ export interface SearchDoneEvent {
   results: { url: string; title: string; score?: number | null }[];
 }
 
+export interface FetchedPage {
+  url: string;
+  title: string;
+  domain: string;
+  ok?: boolean;
+  chars?: number;
+}
+
 export interface FetchDoneEvent {
   type: "fetch_done";
-  pages: { url: string; title: string; domain: string; ok?: boolean }[];
+  pages: FetchedPage[];
 }
 
 export interface Snippet {

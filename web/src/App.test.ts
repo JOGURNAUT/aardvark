@@ -12,6 +12,8 @@ const empty = () =>
       stages: { plan: "idle", search: "idle", fetch: "idle", select: "idle", answer: "idle" },
       plan: [],
       strategy: "",
+      searchResults: 0,
+      pages: [],
       pagesFetched: 0,
       snippets: [],
       answer: "",
@@ -39,6 +41,31 @@ describe("stage machine", () => {
     expect(r.stages.fetch).toBe("done");
     expect(r.stages.select).toBe("done");
     expect(r.stages.answer).toBe("running");
+  });
+
+  it("keeps the per-page fetch results, not just the count", () => {
+    // The trace shows each page with ok/fail and a character count. A page that
+    // returns 200 and zero extractable text is the most common reason an answer
+    // is thin, and a bare count hides it completely.
+    const r = play([
+      {
+        type: "fetch_done",
+        pages: [
+          { url: "https://a.com/x", title: "A", domain: "a.com", ok: true, chars: 4200 },
+          { url: "https://b.com/y", title: "B", domain: "b.com", ok: false, chars: 0 },
+        ],
+      },
+    ]);
+    expect(r.pages).toHaveLength(2);
+    expect(r.pages[1].ok).toBe(false);
+    expect(r.pages[1].chars).toBe(0);
+  });
+
+  it("keeps the search result count", () => {
+    const r = play([
+      { type: "search_done", results: [{ url: "a", title: "" }, { url: "b", title: "" }] },
+    ]);
+    expect(r.searchResults).toBe(2);
   });
 
   it("counts pages and snippets for the trail", () => {
