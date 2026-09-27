@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ask, createSession } from "./api";
+import { ErrorBoundary } from "./ErrorBoundary";
 import { STAGES } from "./types";
 import type { AgentEvent, Citation, FetchedPage, Snippet, Stage } from "./types";
 
@@ -214,8 +215,12 @@ export default function App() {
         </section>
       )}
 
-      {started && <StageTrail run={run} />}
-      {started && <Trace run={run} />}
+      {started && (
+        <ErrorBoundary label="trace">
+          <StageTrail run={run} />
+          <Trace run={run} />
+        </ErrorBoundary>
+      )}
 
       {run.errors.map((e, i) => (
         <div className="error" key={i}>
@@ -225,8 +230,10 @@ export default function App() {
       ))}
 
       {run.answer && (
-        <AnswerText text={run.answer} citations={run.citations}
-                    streaming={busy && run.stages.answer === "running"} />
+        <ErrorBoundary label="answer">
+          <AnswerText text={run.answer} citations={run.citations}
+                      streaming={busy && run.stages.answer === "running"} />
+        </ErrorBoundary>
       )}
 
       {run.latencyMs !== null && (
@@ -242,19 +249,9 @@ export default function App() {
       )}
 
       {run.snippets.length > 0 && (
-        <section className="snippets">
-          <h2>Evidence &middot; {run.snippets.length} snippets</h2>
-          {run.snippets.map((s, i) => (
-            <article key={i}>
-              <span className="num">{i + 1}</span>
-              <span className="head">
-                <a href={s.url} target="_blank" rel="noreferrer">{s.title || s.url}</a>
-                <span className="domain">{s.domain}</span>
-              </span>
-              <p>{s.text.slice(0, 300)}{s.text.length > 300 ? "..." : ""}</p>
-            </article>
-          ))}
-        </section>
+        <ErrorBoundary label="evidence">
+          <Evidence snippets={run.snippets} />
+        </ErrorBoundary>
       )}
     </div>
   );
@@ -333,6 +330,33 @@ function Trace({ run }: { run: RunState }) {
         </div>
       )}
     </section>
+  );
+}
+
+/** The evidence list. Exported so it can be render-tested against a payload
+ *  shaped like the wire, which is where the black-screen crash lived: the
+ *  reducer never touched the missing field, only the render did. */
+export function Evidence({ snippets }: { snippets: Snippet[] }) {
+  return (
+      <section className="snippets">
+        <h2>Evidence &middot; {snippets.length} snippets</h2>
+        {snippets.map((s, i) => (
+          <article key={i}>
+            <span className="num">{i + 1}</span>
+            <span className="head">
+              <a href={s.url} target="_blank" rel="noreferrer">{s.title || s.url}</a>
+              <span className="domain">{s.domain}</span>
+            </span>
+            {/* select_done sends `chars`, a length, not the snippet text.
+                Showing the length is honest; the text is not on the wire. */}
+            <p>
+              {s.chars != null && `${s.chars.toLocaleString()} characters`}
+              {s.score != null && ` · relevance ${s.score.toFixed(3)}`}
+              {s.text && ` · ${s.text.slice(0, 220)}`}
+            </p>
+          </article>
+        ))}
+      </section>
   );
 }
 

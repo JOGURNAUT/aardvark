@@ -110,8 +110,19 @@ them, so drift between the two shows up in the UI rather than as silence.
 
 ### Known limitations
 
-- `web/src/types.ts` is hand-written against a docstring in `loop.py`. It can
-  drift; the unknown-event counter is what makes a drift visible, not a fix.
+- `web/src/types.ts` is hand-written against a docstring in `loop.py`, and it
+  drifted on the first real query. `select_done` carries `chars`, a length, and
+  the type declared a required `text: string`, so the evidence list called
+  `.slice()` on a field that is never on the wire. React unmounted the tree and
+  the page went black with nothing on it naming the cause.
+
+  The unknown-event counter did not catch it and could not: it compares event
+  *types*, and this was a missing *field*. What now covers it is that every
+  optional field in `Snippet` is typed optional, a render test builds a snippet
+  shaped exactly like the wire, and `ErrorBoundary` wraps the three regions that
+  render server data, so the next drift of this kind shows the error on the page
+  instead of blanking it. Generating the types from the loop would remove the
+  class of bug; nothing here does that yet.
 - No frontend test runner. `reduce()` in `App.tsx` is exported and pure
   specifically so one can be added without restructuring anything.
 - One session per page load, created on mount. There is no session list in this

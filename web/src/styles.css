@@ -493,3 +493,10 @@ button {
   .trace .meta { width: 52px; }
   .trace .row .domain { display: none; }
 }
+
+.error.boundary { align-items: baseline; }
+.btn-ghost.inline {
+  margin-left: 10px;
+  padding: 2px 9px;
+  font-size: 12px;
+}

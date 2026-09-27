@@ -36,7 +36,18 @@ export interface Snippet {
   domain: string;
   url: string;
   score?: number;
-  text: string;
+  // The select_done event carries `chars`, a length, NOT the snippet text.
+  // This was declared as a required `text: string` and the UI called
+  // .slice() on it, so the first real query blanked the page: the exception
+  // unmounted the tree and left a black screen with nothing in the console
+  // that named the cause.
+  //
+  // Every field here is optional for the same reason. This file is written by
+  // hand against a docstring in loop.py, so it can be wrong, and a type that
+  // promises more than the wire delivers turns a missing field into a crash
+  // instead of a blank.
+  chars?: number;
+  text?: string;
 }
 
 export interface SelectDoneEvent {
