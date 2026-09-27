@@ -42,11 +42,11 @@ const emptyRun = (): RunState => ({
 // shown because "fetch" says what the code is doing and "hauling logs" says
 // how long to expect to wait.
 const NICK: Record<Stage, string> = {
-  plan: "surveying the stream",
-  search: "scouting the banks",
-  fetch: "hauling logs",
-  select: "gnawing it down",
-  answer: "building the dam",
+  plan: "sniffing the ground",
+  search: "finding the mounds",
+  fetch: "digging in",
+  select: "sifting the soil",
+  answer: "bringing it up",
 };
 
 const EXAMPLES = [
@@ -64,14 +64,15 @@ const EXAMPLES = [
   },
 ];
 
-// A page that loaded and yielded nothing. The server sends ok and chars
-// separately, so this is derived rather than reported, and it is the single
-// most useful thing in the trace: it is the usual reason an answer is thin.
-type PageKind = "ok" | "hollow" | "failed";
+// A dry dig: a page that loaded and gave up nothing. The server sends ok and
+// chars separately, so this is derived rather than reported, and it is the
+// single most useful line in the trace, because it is the usual reason an
+// answer comes out thin.
+type PageKind = "ok" | "dry" | "failed";
 
 function kindOf(p: FetchedPage): PageKind {
   if (p.ok === false) return "failed";
-  if (p.chars != null && p.chars === 0) return "hollow";
+  if (p.chars != null && p.chars === 0) return "dry";
   return "ok";
 }
 
@@ -92,15 +93,22 @@ function splitUrl(p: FetchedPage): { host: string; path: string } {
   }
 }
 
+// Five strata with a burrow cutting down through them, the last two greying
+// out while a run is live so the tunnel reads as still being dug. The burrow
+// is stroked in the background colour, so it punches through the lines rather
+// than drawing over them.
 const Logo = ({ size = 30, live = false }: { size?: number; live?: boolean }) => (
   <svg width={size} height={size} viewBox="0 0 48 48" fill="none" aria-hidden="true">
-    <circle cx="24" cy="24" r="4" stroke="#E0A064" strokeWidth="2.5" />
-    <circle cx="24" cy="24" r="9" stroke="#E0A064" strokeWidth="2.5" />
-    <circle className={live ? "bv-pulse" : undefined} cx="24" cy="24" r="14"
-            stroke="#E0A064" strokeWidth="2.5" />
-    <circle cx="24" cy="24" r="19" stroke={live ? "#3D352B" : "#E0A064"} strokeWidth="2.5" />
-    <circle cx="24" cy="24" r="23" stroke={live ? "#3D352B" : "#E0A064"} strokeWidth="2" />
-    <path d="M30 24 L48 13 L48 35 Z" fill="#15120E" />
+    <line x1="4" y1="6" x2="44" y2="6" stroke="#C6E15B" strokeWidth="3" strokeLinecap="round" />
+    <line x1="4" y1="15" x2="44" y2="15" stroke="#C6E15B" strokeWidth="3" strokeLinecap="round" />
+    <line className={live ? "bv-pulse" : undefined}
+          x1="4" y1="24" x2="44" y2="24" stroke="#C6E15B" strokeWidth="3" strokeLinecap="round" />
+    <line x1="4" y1="33" x2="44" y2="33" stroke={live ? "#3A3734" : "#C6E15B"}
+          strokeWidth="3" strokeLinecap="round" />
+    <line x1="4" y1="42" x2="44" y2="42" stroke={live ? "#3A3734" : "#C6E15B"}
+          strokeWidth="3" strokeLinecap="round" />
+    <path d="M15 0 C15 18, 34 16, 31 39" stroke="#121110" strokeWidth="7" strokeLinecap="round" />
+    <circle cx="31" cy="40" r="4.5" fill="#C6E15B" />
   </svg>
 );
 
@@ -258,7 +266,7 @@ export default function App() {
         <header className="bar">
           <span className="brand">
             <Logo live={busy} />
-            <span className="word">Beaver</span>
+            <span className="word">Aardvark</span>
           </span>
           {busy ? (
             <button className="pill-ghost" onClick={stop}>Stop</button>
@@ -281,7 +289,7 @@ export default function App() {
             <h1 className="hero">
               One question.
               <br />
-              <em>Every log it gnawed through.</em>
+              <em>Dug all the way down.</em>
             </h1>
 
             <div className="field">
@@ -303,15 +311,15 @@ export default function App() {
                         disabled={!sessionId || !query.trim()}>
                   Research
                   <svg width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden="true">
-                    <path d="M2 7 H12 M8 3 L12 7 L8 11" stroke="#15120E" strokeWidth="1.8" />
+                    <path d="M2 7 H12 M8 3 L12 7 L8 11" stroke="#121110" strokeWidth="1.8" />
                   </svg>
                 </button>
               </div>
             </div>
 
             <p className="standfirst">
-              Beaver shows every query it runs and every page it reads, including the ones
-              that come back hollow, so you can see what the answer stands on.
+              Aardvark shows every query it runs and every page it reads, including the dry
+              digs that give up no text, so you can see what the answer stands on.
             </p>
 
             <div className="suggest">
@@ -387,7 +395,7 @@ export default function App() {
 
             {run.latencyMs !== null && (
               <footer className="note-foot">
-                Beaver builds each answer only from the snippets listed above.
+                Aardvark builds each answer only from the snippets listed above.
                 {Object.entries(run.stageLatencies).map(([s, secs]) => (
                   <span key={s}> · {s} {Math.round(secs * 1000)} ms</span>
                 ))}
@@ -410,7 +418,7 @@ export default function App() {
  * sends `ok` and `chars` separately and neither alone says it.
  */
 function Trace({ run }: { run: RunState }) {
-  const hollow = run.pages.filter((p) => kindOf(p) === "hollow");
+  const dry = run.pages.filter((p) => kindOf(p) === "dry");
   const failed = run.pages.filter((p) => kindOf(p) === "failed");
 
   return (
@@ -424,13 +432,13 @@ function Trace({ run }: { run: RunState }) {
               <span className="bead">
                 {state === "done" && (
                   <svg width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden="true">
-                    <path d="M3 7.2 L6 10 L11 4" stroke="#15120E" strokeWidth="2" />
+                    <path d="M3 7.2 L6 10 L11 4" stroke="#121110" strokeWidth="2" />
                   </svg>
                 )}
                 {state === "running" && (
                   <svg className="bv-spin" width="14" height="14" viewBox="0 0 14 14"
                        fill="none" aria-hidden="true">
-                    <path d="M7 1.5 A5.5 5.5 0 0 1 12.5 7" stroke="#E0A064" strokeWidth="2" />
+                    <path d="M7 1.5 A5.5 5.5 0 0 1 12.5 7" stroke="#C6E15B" strokeWidth="2" />
                   </svg>
                 )}
               </span>
@@ -483,7 +491,7 @@ function Trace({ run }: { run: RunState }) {
                         <div className={`prow ${kind}`} key={k}>
                           <span className="st">
                             <Dot kind={kind} />
-                            {kind === "failed" ? "failed" : kind === "hollow" ? "hollow" : "200"}
+                            {kind === "failed" ? "403" : kind === "dry" ? "dry" : "200"}
                           </span>
                           <span className="where">
                             <a href={p.url} target="_blank" rel="noreferrer">{host}</a>
@@ -504,20 +512,20 @@ function Trace({ run }: { run: RunState }) {
                     })}
                   </div>
 
-                  {(hollow.length > 0 || failed.length > 0) && (
+                  {(dry.length > 0 || failed.length > 0) && (
                     <div className="note">
                       <svg width="16" height="16" viewBox="0 0 18 18" fill="none" aria-hidden="true">
-                        <circle cx="9" cy="9" r="7" stroke="#E0A064" strokeWidth="2" />
+                        <circle cx="9" cy="9" r="7" stroke="#C6E15B" strokeWidth="2" />
                       </svg>
                       <p>
                         <strong>
-                          {hollow.length} of {run.pages.length} pages came back hollow
+                          {dry.length} of {run.pages.length} pages were dry digs
                         </strong>
-                        {" — they loaded, but gave no readable text"}
-                        {hollow.length > 0 && `: ${hollow.map((p) => p.domain || p.url).join(", ")}`}
+                        {" — they loaded, but gave up no readable text"}
+                        {dry.length > 0 && `: ${dry.map((p) => p.domain || p.url).join(", ")}`}
                         {failed.length > 0 &&
                           `. ${failed.length} more refused the request: ${failed.map((p) => p.domain || p.url).join(", ")}`}
-                        {`. This answer rests on the other ${run.pages.length - hollow.length - failed.length} pages.`}
+                        {`. This answer rests on the other ${run.pages.length - dry.length - failed.length} pages.`}
                       </p>
                     </div>
                   )}
@@ -542,20 +550,20 @@ function Dot({ kind }: { kind: PageKind }) {
   if (kind === "failed") {
     return (
       <svg width="10" height="10" viewBox="0 0 10 10" fill="none" aria-hidden="true">
-        <path d="M1.5 1.5 L8.5 8.5 M8.5 1.5 L1.5 8.5" stroke="#D97A63" strokeWidth="1.8" />
+        <path d="M1.5 1.5 L8.5 8.5 M8.5 1.5 L1.5 8.5" stroke="#F07A93" strokeWidth="1.8" />
       </svg>
     );
   }
-  if (kind === "hollow") {
+  if (kind === "dry") {
     return (
       <svg width="10" height="10" viewBox="0 0 10 10" fill="none" aria-hidden="true">
-        <circle cx="5" cy="5" r="3.8" stroke="#E0A064" strokeWidth="1.6" />
+        <circle cx="5" cy="5" r="3.8" stroke="#C6E15B" strokeWidth="1.6" />
       </svg>
     );
   }
   return (
     <svg width="10" height="10" viewBox="0 0 10 10" aria-hidden="true">
-      <circle cx="5" cy="5" r="4" fill="#B5AA98" />
+      <circle cx="5" cy="5" r="4" fill="#ADA9A0" />
     </svg>
   );
 }

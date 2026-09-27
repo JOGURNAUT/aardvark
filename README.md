@@ -1,4 +1,4 @@
-# Beaver: Deep Research Agent
+# Aardvark: Deep Research Agent
 
 A streaming web-research agent that plans, searches, fetches, selects context, and answers with grounded citations. Built without LangChain, LangGraph, CrewAI, LlamaIndex, or Haystack - the agent loop and orchestration are hand-rolled Python.
 

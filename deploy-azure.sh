@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Deploy Beaver to Azure Container Apps.
+# Deploy Aardvark to Azure Container Apps.
 #
 # Prereq: Azure CLI. If `az` is not found:
 #     winget install -e --id Microsoft.AzureCLI
@@ -8,6 +8,11 @@
 # Run:  bash deploy-azure.sh
 set -euo pipefail
 
+# These are the LIVE resource names and they still say beaver. Azure
+# Container Apps cannot be renamed in place: changing APP creates a second
+# app on a new hostname and abandons the current one, which is a URL on a
+# CV. Renaming the product did not rename the infrastructure, and pretending
+# otherwise here would break the script against what is actually deployed.
 RG="beaver-rg"
 APP="beaver"
 LOCATION="centralindia"

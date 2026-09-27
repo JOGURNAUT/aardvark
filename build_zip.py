@@ -6,11 +6,11 @@ import zipfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
-OUT = ROOT / "beaver.zip"
+OUT = ROOT / "aardvark.zip"
 
 EXCLUDE_DIRS = {".venv", "data", "__pycache__", ".pytest_cache",
                 ".git", ".idea", ".vscode", "node_modules"}
-EXCLUDE_FILES = {".env", ".DS_Store", "build_zip.py", "beaver.zip"}
+EXCLUDE_FILES = {".env", ".DS_Store", "build_zip.py", "aardvark.zip"}
 EXCLUDE_SUFFIXES = {".pyc", ".pyo", ".db", ".sqlite", ".sqlite3"}
 
 

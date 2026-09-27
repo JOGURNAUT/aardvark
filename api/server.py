@@ -66,7 +66,7 @@ from storage import db
 
 log = logging.getLogger(__name__)
 
-app = FastAPI(title="Beaver", docs_url="/api/docs", openapi_url="/api/openapi.json")
+app = FastAPI(title="Aardvark", docs_url="/api/docs", openapi_url="/api/openapi.json")
 
 # The Vite dev server runs on a different origin. In the container the built
 # assets are served from this same app, so this only ever matters in development.

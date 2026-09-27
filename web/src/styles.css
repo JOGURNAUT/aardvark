@@ -1,6 +1,6 @@
-/* Beaver
+/* Aardvark
  *
- * Implements the canvas design: a warm dark ground, one cedar accent, and
+ * Implements the canvas design: a neutral dark ground, one lime accent, and
  * three typefaces with distinct jobs. Instrument Serif is the display face,
  * Newsreader carries every run of reading text, and IBM Plex Mono is reserved
  * for the trace, so anything in mono is machine output and anything in the
@@ -12,21 +12,21 @@
  */
 
 :root {
-  --bg: #15120e;
-  --surface: #1c1813;
-  --line: #2e2820;
-  --line-strong: #3d352b;
-  --hairline: #221e18;
+  --bg: #121110;
+  --surface: #1a1917;
+  --line: #2a2826;
+  --line-strong: #3a3734;
+  --hairline: #201f1d;
 
-  --fg: #eee6d8;
-  --fg-2: #d8cfc0;
-  --muted: #b5aa98;
-  --faint: #8f8474;
-  --dim: #6e6558;
+  --fg: #eceae4;
+  --fg-2: #d6d3cc;
+  --muted: #ada9a0;
+  --faint: #8a867e;
+  --dim: #6a665f;
 
-  --accent: #e0a064;
-  --accent-hi: #f2be8a;
-  --fail: #d97a63;
+  --accent: #c6e15b;
+  --accent-hi: #ddf08a;
+  --fail: #f07a93;
 
   --col: 760px;
   --serif: "Instrument Serif", Georgia, serif;
@@ -313,7 +313,7 @@ textarea:focus { outline: none; border-color: var(--accent); }
 .ptable .prow { min-height: 40px; border-bottom: 1px solid var(--hairline); }
 
 .prow .st { display: flex; align-items: center; gap: 8px; color: var(--muted); }
-.prow.hollow .st, .prow.hollow .chars { color: var(--accent); }
+.prow.dry .st, .prow.dry .chars { color: var(--accent); }
 .prow.failed .st, .prow.failed .chars { color: var(--fail); }
 
 .prow .where { display: flex; gap: 2px; overflow: hidden; white-space: nowrap; min-width: 0; }
@@ -323,7 +323,7 @@ textarea:focus { outline: none; border-color: var(--accent); }
 
 .prow .bar { height: 6px; background: var(--hairline); border-radius: 3px; overflow: hidden; display: flex; }
 .prow .bar i { display: block; border-radius: 3px; background: var(--muted); }
-.prow.hollow .bar i { background: var(--accent); }
+.prow.dry .bar i { background: var(--accent); }
 .prow .chars { color: var(--muted); }
 
 /* ------------------------------------------------------------------- note */
@@ -398,7 +398,7 @@ textarea:focus { outline: none; border-color: var(--accent); }
   line-height: 1;
   text-decoration: none;
   color: var(--accent);
-  background: rgba(224, 160, 100, 0.12);
+  background: rgba(198, 225, 91, 0.14);
   border-radius: 4px;
   padding: 2px 5px;
   margin-left: 2px;
@@ -406,7 +406,7 @@ textarea:focus { outline: none; border-color: var(--accent); }
   top: -2px;
 }
 .cite:hover { background: var(--accent); color: var(--bg); }
-.cite.dead { color: var(--fail); background: rgba(217, 122, 99, 0.12); }
+.cite.dead { color: var(--fail); background: rgba(240, 122, 147, 0.14); }
 
 /* --------------------------------------------------------------- evidence */
 

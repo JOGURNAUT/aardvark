@@ -1,4 +1,4 @@
-# Beaver — container image for Azure Container Apps
+# Aardvark — container image for Azure Container Apps
 #
 # Two things matter here, both about image size and cold start:
 #
