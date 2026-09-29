@@ -26,3 +26,8 @@ docs/*.finalize.json
 docs/*.finalize-summary.json
 docs/*.delivery.json
 docs/*.browser-check.json
+
+# eval/results/ stays ignored (raw runs, large, machine-specific).
+# eval/results-sample/ is committed: a trimmed summary or two kept as evidence
+# of what a run actually reported, including the ones that could not finish.
+!eval/results-sample/

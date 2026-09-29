@@ -165,6 +165,41 @@ Four decisions in it are worth stating, because each one changes the number:
 have to be someone's actual judgement, and there is no number to quote until
 they exist.
 
+### Why there is no headline eval number
+
+The judge is Gemini only, with no fallback, because the fallback is the model
+under evaluation. That is the right call and it has a cost: when the judge's
+quota runs out, the run records gaps instead of scores.
+
+The quota is the binding constraint, and it is smaller than it looks. The 429
+payload names it exactly:
+
+```
+quotaId:   GenerateRequestsPerDayPerProjectPerModel-FreeTier
+metric:    generativelanguage.googleapis.com/generate_content_free_tier_requests
+limit:     20     model: gemini-2.5-flash
+```
+
+**Twenty judge calls per day.** A single question needs three (relevance,
+faithfulness, citation precision), so six questions need about nineteen and the
+full seventeen need roughly fifty. The complete set cannot finish on the free
+tier on any day, and two attempts confirmed it: one scored 8 of 14 applicable
+faithfulness cases, a later one 0 of 6.
+
+So this README reports coverage rather than a mean. An `avg_citation_precision`
+of 1.0 over two of fourteen applicable cases is not a measurement, and the
+harness says so rather than printing the 1.0 alone.
+
+The smallest run that can finish inside the daily quota is three questions:
+
+```bash
+python eval/run_eval.py --only f1,u1,x1
+```
+
+That is one factual, one that should be refused, and one where sources
+disagree. It is a small sample and it is complete, which is the better of the
+two failure modes.
+
 ## Part 1 - Design note
 
 ### Target user & problem

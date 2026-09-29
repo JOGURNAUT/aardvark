@@ -1,0 +1,119 @@
+{
+  "n_questions": 6,
+  "overall": {
+    "avg_relevance": null,
+    "avg_faithfulness": null,
+    "avg_citation_precision": null,
+    "avg_refusal_score": null,
+    "avg_conflict_score": null,
+    "avg_multi_source": 0.5,
+    "avg_context_resolution": null,
+    "avg_gold_fact_coverage": 0.1,
+    "avg_latency_ms": 22283.167,
+    "avg_unique_domains_per_answer": 1.5
+  },
+  "coverage": {
+    "relevance": {
+      "scored": 0,
+      "applicable": 6,
+      "complete": false
+    },
+    "faithfulness": {
+      "scored": 0,
+      "applicable": 5,
+      "complete": false
+    },
+    "citation_precision": {
+      "scored": 0,
+      "applicable": 5,
+      "complete": false
+    },
+    "refusal_score": {
+      "scored": 0,
+      "applicable": 1,
+      "complete": false
+    },
+    "conflict_score": {
+      "scored": 0,
+      "applicable": 1,
+      "complete": false
+    },
+    "context_resolution": {
+      "scored": 0,
+      "applicable": 1,
+      "complete": false
+    }
+  },
+  "judge_failures": [
+    {
+      "note": "19 failures, all the same cause",
+      "distinct_reasons": [
+        "judge_call_failed: All providers failed; last error: 429 RESOURCE_EXHAUSTED",
+        "judge_failed"
+      ],
+      "quota": {
+        "limit": 20,
+        "per": "day",
+        "model": "gemini-2.5-flash",
+        "quotaId": "GenerateRequestsPerDayPerProjectPerModel-FreeTier"
+      }
+    }
+  ],
+  "by_category": {
+    "factual_single_hop": {
+      "n": 1,
+      "avg_relevance": null,
+      "avg_faithfulness": null,
+      "avg_citation_precision": null,
+      "avg_refusal_score": null,
+      "avg_conflict_score": null,
+      "avg_latency_ms": 45087.0
+    },
+    "multi_hop": {
+      "n": 1,
+      "avg_relevance": null,
+      "avg_faithfulness": null,
+      "avg_citation_precision": null,
+      "avg_refusal_score": null,
+      "avg_conflict_score": null,
+      "avg_latency_ms": 15542.0
+    },
+    "comparison": {
+      "n": 1,
+      "avg_relevance": null,
+      "avg_faithfulness": null,
+      "avg_citation_precision": null,
+      "avg_refusal_score": null,
+      "avg_conflict_score": null,
+      "avg_latency_ms": 17227.0
+    },
+    "insufficient_evidence": {
+      "n": 1,
+      "avg_relevance": null,
+      "avg_faithfulness": null,
+      "avg_citation_precision": null,
+      "avg_refusal_score": null,
+      "avg_conflict_score": null,
+      "avg_latency_ms": 16051.0
+    },
+    "conflicting_sources": {
+      "n": 1,
+      "avg_relevance": null,
+      "avg_faithfulness": null,
+      "avg_citation_precision": null,
+      "avg_refusal_score": null,
+      "avg_conflict_score": null,
+      "avg_latency_ms": 25910.0
+    },
+    "multi_turn": {
+      "n": 1,
+      "avg_relevance": null,
+      "avg_faithfulness": null,
+      "avg_citation_precision": null,
+      "avg_refusal_score": null,
+      "avg_conflict_score": null,
+      "avg_latency_ms": 13882.0
+    }
+  },
+  "_note": "Six questions, one per category. Every judge call hit the free-tier daily cap, so every metric has zero coverage. Committed as evidence that the harness reports the gap instead of a mean."
+}
