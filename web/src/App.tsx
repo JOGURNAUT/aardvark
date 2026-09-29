@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { ask, createSession } from "./api";
+import { ask, createSession, dig } from "./api";
 import { ErrorBoundary } from "./ErrorBoundary";
 import { STAGES } from "./types";
 import type {
@@ -261,6 +261,28 @@ export default function App() {
     }
   }, [sessionId, query, busy]);
 
+  const runDig = useCallback(async () => {
+    if (!sessionId || busy) return;
+    const controller = new AbortController();
+    abortRef.current = controller;
+    setBusy(true);
+    setElapsed(0);
+    try {
+      for await (const ev of dig(sessionId, controller.signal)) {
+        setRun((r) => reduce(r, ev));
+      }
+    } catch (e) {
+      const stopped = e instanceof DOMException && e.name === "AbortError";
+      setRun((r) => ({
+        ...r,
+        errors: [...r.errors, { stage: "dig", message: stopped ? "stopped" : String(e) }],
+      }));
+    } finally {
+      setBusy(false);
+      abortRef.current = null;
+    }
+  }, [sessionId, busy]);
+
   const reset = () => {
     abortRef.current?.abort();
     setStarted(false);
@@ -372,7 +394,7 @@ export default function App() {
             )}
 
             <ErrorBoundary label="trace">
-              <Trace run={run} />
+              <Trace run={run} onDig={runDig} digging={busy} />
             </ErrorBoundary>
 
             {run.errors.map((e, i) => (
@@ -442,8 +464,13 @@ export default function App() {
  * refusals carry their search rank, because a refusal from the top result and
  * one from the twentieth are not the same event.
  */
-export function FetchNote({ run, dry, failed }:
-                   { run: RunState; dry: FetchedPage[]; failed: FetchedPage[] }) {
+export function FetchNote({ run, dry, failed, onDig, digging = false }: {
+  run: RunState;
+  dry: FetchedPage[];
+  failed: FetchedPage[];
+  onDig?: () => void;
+  digging?: boolean;
+}) {
   const readable = run.pages.length - dry.length - failed.length;
   const unopened = Math.max(0, run.considered - run.pages.length);
   const topBlocked = [...failed].sort((a, b) => (a.rank ?? 99) - (b.rank ?? 99))[0];
@@ -507,6 +534,14 @@ export function FetchNote({ run, dry, failed }:
             {run.skipped.some((k) => k.reason.includes("domain"))
               ? "Some hit the two-per-domain rule; the rest hit the page cap."
               : "They were past the page cap."}
+            {onDig && (
+              <>
+                {" "}
+                <button className="linkbtn" onClick={onDig} disabled={digging}>
+                  {digging ? "Digging" : `Dig deeper — open ${Math.min(unopened, 6)} more`}
+                </button>
+              </>
+            )}
           </p>
         )}
 
@@ -553,7 +588,8 @@ export function WeakEvidence({ snippets }: { snippets: Snippet[] }) {
   );
 }
 
-function Trace({ run }: { run: RunState }) {
+function Trace({ run, onDig, digging }:
+               { run: RunState; onDig?: () => void; digging?: boolean }) {
   const dry = run.pages.filter((p) => kindOf(p) === "dry");
   const failed = run.pages.filter((p) => kindOf(p) === "failed");
 
@@ -659,7 +695,8 @@ function Trace({ run }: { run: RunState }) {
                     })}
                   </div>
 
-                  <FetchNote run={run} dry={dry} failed={failed} />
+                  <FetchNote run={run} dry={dry} failed={failed}
+                             onDig={onDig} digging={digging} />
                 </>
               )}
 
@@ -702,6 +739,15 @@ function Dot({ kind }: { kind: PageKind }) {
 /** Pure reducer, so the event handling is testable without a browser. */
 export function reduce(r: RunState, ev: AgentEvent): RunState {
   switch (ev.type) {
+    case "dig_start":
+      // A dig is a new turn over the same question, so the stage machine
+      // restarts from fetch: there is no plan and no search, the results were
+      // already ranked and stored by the turn being continued.
+      return {
+        ...emptyRun(),
+        stages: { plan: "done", search: "done", fetch: "running",
+                  select: "idle", answer: "idle" },
+      };
     case "plan":
       return {
         ...r,

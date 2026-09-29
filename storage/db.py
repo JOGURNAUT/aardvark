@@ -38,6 +38,7 @@ CREATE TABLE IF NOT EXISTS turns (
     created_at TEXT NOT NULL,
     latency_ms INTEGER,
     stage_latencies_json TEXT DEFAULT '{}',   -- dict[stage_name -> seconds]
+    pending_urls_json TEXT DEFAULT '[]',      -- list[{url,domain,rank,reason}] not yet opened
     FOREIGN KEY (session_id) REFERENCES sessions(id)
 );
 
@@ -66,11 +67,17 @@ def connect() -> Iterator[sqlite3.Connection]:
 def init_db() -> None:
     with connect() as conn:
         conn.executescript(SCHEMA)
-        #backfill column for DBs created before stage_latencies was added
-        try:
-            conn.execute("ALTER TABLE turns ADD COLUMN stage_latencies_json TEXT DEFAULT '{}'")
-        except sqlite3.OperationalError:
-            pass  #column already exists, normal
+        #backfill columns for databases created before they were added.
+        #ALTER TABLE ADD COLUMN is the only schema change SQLite does cheaply,
+        #and re-running it on a current database is the normal case, not an error.
+        for ddl in (
+            "ALTER TABLE turns ADD COLUMN stage_latencies_json TEXT DEFAULT '{}'",
+            "ALTER TABLE turns ADD COLUMN pending_urls_json TEXT DEFAULT '[]'",
+        ):
+            try:
+                conn.execute(ddl)
+            except sqlite3.OperationalError:
+                pass  #column already exists, normal
 
 
 # ---- sessions ----
@@ -148,14 +155,15 @@ def save_turn(
     citations: list[dict[str, Any]],
     latency_ms: int,
     stage_latencies: dict[str, float] | None = None,
+    pending_urls: list[dict[str, Any]] | None = None,
 ) -> int:
     with connect() as conn:
         cur = conn.execute(
             """INSERT INTO turns
                (session_id, query, plan, search_queries_json, urls_opened_json,
                 snippets_json, final_answer, citations_json, created_at, latency_ms,
-                stage_latencies_json)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                stage_latencies_json, pending_urls_json)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 session_id,
                 query,
@@ -168,6 +176,7 @@ def save_turn(
                 _now(),
                 latency_ms,
                 json.dumps(stage_latencies or {}),
+                json.dumps(pending_urls or []),
             ),
         )
         return cur.lastrowid
@@ -181,7 +190,8 @@ def get_turns(session_id: str) -> list[dict[str, Any]]:
     out = []
     for r in rows:
         d = dict(r)
-        for k in ("search_queries_json", "urls_opened_json", "snippets_json", "citations_json"):
+        for k in ("search_queries_json", "urls_opened_json", "snippets_json",
+                  "citations_json", "pending_urls_json"):
             d[k.replace("_json", "")] = json.loads(d.pop(k) or "[]")
         #stage_latencies is a dict, not a list
         d["stage_latencies"] = json.loads(d.pop("stage_latencies_json", None) or "{}")

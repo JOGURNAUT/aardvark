@@ -120,6 +120,13 @@ export interface AnswerDoneEvent {
   provider: string;
 }
 
+export interface DigStartEvent {
+  type: "dig_start";
+  query: string;
+  opening: number;
+  remaining_after: number;
+}
+
 export interface ErrorEvent {
   type: "error";
   stage: string;
@@ -127,6 +134,7 @@ export interface ErrorEvent {
 }
 
 export type AgentEvent =
+  | DigStartEvent
   | PlanEvent
   | SearchDoneEvent
   | FetchDoneEvent

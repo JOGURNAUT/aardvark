@@ -217,3 +217,58 @@ def test_pick_never_exceeds_the_cap(cap):
     urls, skipped = loop._pick_urls_to_fetch(ranked, cap=cap)
     assert len(urls) <= cap
     assert len(urls) + len(skipped) == 10
+
+
+# ----------------------------------------------------------- digging deeper
+
+def _pending(*specs):
+    """specs are (domain, n) -> n urls on that domain, in the given order."""
+    out = []
+    rank = 1
+    for domain, n in specs:
+        for i in range(n):
+            out.append({"url": f"https://{domain}/p{i}", "domain": domain,
+                        "rank": rank, "reason": "page cap reached"})
+            rank += 1
+    return out
+
+
+def test_next_batch_takes_the_cap_and_returns_the_rest():
+    batch, leftover = loop._next_batch(_pending(("a.com", 1), ("b.com", 1), ("c.com", 1),
+                                                ("d.com", 1), ("e.com", 1)), cap=3)
+    assert len(batch) == 3
+    assert len(leftover) == 2
+
+
+def test_next_batch_keeps_the_domain_rule_the_first_pass_used():
+    # A dig that ignored it would open six more pages from the one site that
+    # already dominated the search, which is the failure the rule prevents and
+    # is no less a failure the second time round.
+    batch, leftover = loop._next_batch(_pending(("a.com", 5), ("b.com", 1)), cap=6)
+    assert batch == ["https://a.com/p0", "https://a.com/p1", "https://b.com/p0"]
+    assert len(leftover) == 3
+
+
+def test_next_batch_preserves_order_so_higher_ranked_results_go_first():
+    batch, _ = loop._next_batch(_pending(("a.com", 1), ("b.com", 1), ("c.com", 1)), cap=2)
+    assert batch == ["https://a.com/p0", "https://b.com/p0"]
+
+
+def test_next_batch_skips_entries_with_no_url():
+    batch, leftover = loop._next_batch([{"domain": "a.com"}, {"url": "https://b.com/x"}])
+    assert batch == ["https://b.com/x"]
+    assert leftover == []
+
+
+def test_next_batch_infers_the_domain_when_it_was_not_stored():
+    # pending_urls rows written by an older version have no domain field, and
+    # the rule still has to apply to them.
+    pending = [{"url": "https://a.com/1"}, {"url": "https://a.com/2"},
+               {"url": "https://a.com/3"}]
+    batch, leftover = loop._next_batch(pending, cap=6)
+    assert len(batch) == 2
+    assert len(leftover) == 1
+
+
+def test_next_batch_on_an_empty_list_is_empty():
+    assert loop._next_batch([]) == ([], [])

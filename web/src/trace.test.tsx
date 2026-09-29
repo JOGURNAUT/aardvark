@@ -233,3 +233,64 @@ describe("reduce keeps the new trace fields", () => {
     expect(r.skipped).toEqual([]);
   });
 });
+
+// -------------------------------------------------------------- digging
+
+describe("dig", () => {
+  const withUnopened = () => base({
+    considered: 20,
+    pages: [page(), page({ ok: false, chars: 0 })],
+    skipped: [{ url: "u", domain: "d.com", rank: 7, reason: "page cap reached" }],
+  });
+
+  it("offers a dig only when something was left unopened", () => {
+    const r = withUnopened();
+    const dry = r.pages.filter((p: FetchedPage) => p.ok !== false && p.chars === 0);
+    const failed = r.pages.filter((p: FetchedPage) => p.ok === false);
+    const html = renderToStaticMarkup(
+      <FetchNote run={r} dry={dry} failed={failed} onDig={() => {}} />,
+    );
+    expect(html).toContain("Dig deeper");
+  });
+
+  it("caps the offer at one batch rather than promising all 18", () => {
+    // 18 are unopened; a dig opens at most MAX_PAGES_TO_FETCH of them.
+    const r = withUnopened();
+    const html = renderToStaticMarkup(
+      <FetchNote run={r} dry={[]} failed={[]} onDig={() => {}} />,
+    );
+    expect(html).toContain("open 6 more");
+    expect(html).not.toContain("open 18 more");
+  });
+
+  it("shows no button when the caller offers no handler", () => {
+    const html = renderToStaticMarkup(<FetchNote run={withUnopened()} dry={[]} failed={[]} />);
+    expect(html).toContain("never opened");
+    expect(html).not.toContain("Dig deeper");
+  });
+
+  it("disables the button while a dig is running", () => {
+    const html = renderToStaticMarkup(
+      <FetchNote run={withUnopened()} dry={[]} failed={[]} onDig={() => {}} digging />,
+    );
+    expect(html).toContain("disabled");
+    expect(html).toContain("Digging");
+  });
+
+  it("restarts the stage machine at fetch, since a dig does not re-plan", () => {
+    // The results were already ranked and stored by the turn being continued,
+    // so plan and search are done before this starts.
+    const r = reduce(base(), { type: "dig_start", query: "q", opening: 6, remaining_after: 8 });
+    expect(r.stages.plan).toBe("done");
+    expect(r.stages.search).toBe("done");
+    expect(r.stages.fetch).toBe("running");
+    expect(r.stages.answer).toBe("idle");
+  });
+
+  it("clears the previous turn's pages so the trace is not double-counted", () => {
+    const started = base({ pages: [page(), page()], answer: "old answer" });
+    const r = reduce(started, { type: "dig_start", query: "q", opening: 6, remaining_after: 8 });
+    expect(r.pages).toEqual([]);
+    expect(r.answer).toBe("");
+  });
+});

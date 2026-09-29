@@ -243,6 +243,28 @@ def run(session_id: str, user_query: str) -> Iterator[dict]:
         except Exception as e:
             yield {"type": "error", "stage": "summarize", "message": str(e)}
 
+    yield from _answer(
+        session_id=session_id, user_query=user_query,
+        snippets=snippets, pages=pages,
+        plan_strategy=plan_obj.strategy, plan_queries=plan_obj.queries,
+        rolling_summary=rolling_summary, prior_turns=prior_turns,
+        stage_latencies=stage_latencies, t0=t0,
+        pending_urls=skipped,
+    )
+
+def _answer(session_id: str, user_query: str,
+            snippets: list, pages: list,
+            plan_strategy: str, plan_queries: list[str],
+            rolling_summary: str, prior_turns: list,
+            stage_latencies: dict, t0: float,
+            pending_urls: list[dict]) -> Iterator[dict]:
+    """Build the context, stream the answer, map citations, persist the turn.
+
+    Shared by run() and dig() so the citation guard exists in exactly one
+    place. A second copy of "strip the markers that point at nothing" is how a
+    system ends up with one path that guards and one that does not.
+    """
+    last_t = time.time()
     messages = ctx_mod.build_messages(
         user_query=user_query,
         snippets=snippets,
@@ -267,7 +289,7 @@ def run(session_id: str, user_query: str) -> Iterator[dict]:
     #POST-PROCESS CITATIONS- regex extract [n] markers, drop hallucinated
     cleaned_answer, citations = cite_mod.extract_citations(raw_answer, snippets)
     #strip em/en dashes that the model sometimes uses despite the system prompt
-    cleaned_answer = cleaned_answer.replace("—", ",").replace("–", "-")
+    cleaned_answer = cleaned_answer.replace("\u2014", ",").replace("\u2013", "-")
     latency_ms = int((time.time() - t0) * 1000)
 
     yield {
@@ -285,8 +307,8 @@ def run(session_id: str, user_query: str) -> Iterator[dict]:
     db.save_turn(
         session_id=session_id,
         query=user_query,
-        plan=plan_obj.strategy,
-        search_queries=plan_obj.queries,
+        plan=plan_strategy,
+        search_queries=plan_queries,
         urls_opened=[
             {"url": p.url, "title": p.title, "domain": p.domain,
              "retrieved_at": p.retrieved_at, "ok": p.error is None}
@@ -301,4 +323,132 @@ def run(session_id: str, user_query: str) -> Iterator[dict]:
         citations=cite_mod.citations_to_dicts(citations),
         latency_ms=latency_ms,
         stage_latencies=stage_latencies,
+        #What the page cap and the domain rule left behind, so dig() can pick
+        #the run back up instead of searching again.
+        pending_urls=pending_urls,
     )
+
+
+def _next_batch(pending: list[dict], cap: int = MAX_PAGES_TO_FETCH,
+                max_per_domain: int = 2) -> tuple[list[str], list[dict]]:
+    """The next slice of unopened results, under the same rules as the first pass.
+
+    Same caps on purpose. A dig that ignored the domain rule would happily open
+    six more pages from the one site that dominated the search, which is the
+    failure the rule exists to prevent and is no less a failure the second time.
+
+    Returns (urls, still_pending) so the caller can store what is left and
+    offer another dig.
+    """
+    batch: list[str] = []
+    leftover: list[dict] = []
+    per_domain: dict[str, int] = {}
+    for u in pending:
+        url = u.get("url")
+        if not url:
+            continue
+        d = u.get("domain") or urlparse(url).netloc.replace("www.", "")
+        if len(batch) >= cap or per_domain.get(d, 0) >= max_per_domain:
+            leftover.append(u)
+            continue
+        batch.append(url)
+        per_domain[d] = per_domain.get(d, 0) + 1
+    return batch, leftover
+
+
+def dig(session_id: str) -> Iterator[dict]:
+    """Open the results the last turn never got to, and answer again.
+
+    A run stops at MAX_PAGES_TO_FETCH, which on a wide question means most of
+    what the search found is never read. The old trace did not even say so. The
+    results are already ranked and already stored, so continuing is a fetch and
+    a re-rank, not another search: no plan, no Tavily calls, no second bill.
+
+    Snippets from the earlier turn are merged with the new ones and the whole
+    set is re-packed. That matters because the caps are global, not per batch:
+    a strong snippet from this batch should be able to push out a weak one from
+    the last, and two from the same domain still cannot both survive.
+    """
+    t0 = time.time()
+    stage_latencies: dict[str, float] = {}
+
+    session = db.get_session(session_id)
+    if not session:
+        yield {"type": "error", "stage": "session", "message": f"unknown session_id {session_id}"}
+        return
+
+    turns = db.get_turns(session_id)
+    if not turns:
+        yield {"type": "error", "stage": "dig", "message": "nothing to dig into yet"}
+        return
+
+    last = turns[-1]
+    pending = last.get("pending_urls") or []
+    if not pending:
+        yield {"type": "error", "stage": "dig",
+               "message": "every result from that search has already been opened"}
+        return
+
+    user_query = last["query"]
+    already = {u.get("url") for u in (last.get("urls_opened") or [])}
+
+    #PICK- next batch from what was skipped, same caps as the first pass, and
+    #never re-open a URL this session has already read.
+    fresh = [u for u in pending if u.get("url") not in already]
+    batch, leftover = _next_batch(fresh)
+
+    yield {"type": "dig_start", "query": user_query,
+           "opening": len(batch), "remaining_after": len(leftover)}
+
+    #FETCH
+    pages = webfetch.fetch_many(batch) if batch else []
+    stage_latencies["fetch"] = time.time() - t0
+    last_t = time.time()
+    yield {
+        "type": "fetch_done",
+        "pages": [
+            {"url": p.url, "ok": p.error is None, "chars": len(p.text or ""),
+             "error": p.error, "title": p.title, "domain": p.domain}
+            for p in pages
+        ],
+        "considered": len(fresh),
+        "skipped": leftover,
+        "term_coverage": _term_coverage(user_query, pages),
+    }
+
+    #SELECT- score the new pages, merge with what the last turn kept, re-pack.
+    prior = [
+        selector_mod.Snippet(text=d.get("text", ""), url=d.get("url", ""),
+                             title=d.get("title", ""), domain=d.get("domain", ""),
+                             score=float(d.get("score") or 0.0))
+        for d in (last.get("snippets") or []) if d.get("text")
+    ]
+    fresh_snips = selector_mod.score_snippets(pages, user_query) if pages else []
+    snippets = selector_mod.pack(prior + fresh_snips)
+    stage_latencies["select"] = time.time() - last_t
+
+    new_urls = {s.url for s in fresh_snips}
+    yield {
+        "type": "select_done",
+        "snippets": [
+            {"idx": i + 1, "title": s.title, "domain": s.domain,
+             "chars": len(s.text), "score": round(s.score, 3), "url": s.url,
+             #So the UI can show what this dig actually added rather than
+             #re-presenting the same evidence as if it were new.
+             "is_new": s.url in new_urls}
+            for i, s in enumerate(snippets)
+        ],
+    }
+
+    yield from _answer(
+        session_id=session_id, user_query=user_query,
+        snippets=snippets, pages=pages,
+        plan_strategy=f"dig: opened {len(batch)} more of {len(fresh)} unread results",
+        plan_queries=last.get("search_queries") or [],
+        rolling_summary=session.get("rolling_summary", "") or "",
+        prior_turns=turns,
+        stage_latencies=stage_latencies, t0=t0,
+        pending_urls=leftover,
+    )
+
+

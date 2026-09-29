@@ -45,8 +45,14 @@ def _fake_run(session_id: str, user_query: str):
         raise
 
 
+def _fake_dig(session_id: str):
+    """dig() takes no query: it continues the question already asked."""
+    yield from _fake_run(session_id, "(continued)")
+
+
 _fake_loop = types.ModuleType("agent.loop")
 _fake_loop.run = _fake_run                      # type: ignore[attr-defined]
+_fake_loop.dig = _fake_dig                      # type: ignore[attr-defined]
 sys.modules["agent.loop"] = _fake_loop
 
 import agent                                     # noqa: E402
@@ -63,6 +69,17 @@ def client(tmp_path, monkeypatch):
     _CLOSED.clear()
     # Keep every test's sessions in its own file so ordering cannot matter.
     monkeypatch.setattr(server.db, "DB_PATH", str(tmp_path / "test.db"), raising=False)
+
+    # Neutralise the startup warmup.
+    #
+    # It runs on a background thread and writes to server._ready, so the tests
+    # below that set _ready by hand were racing it: the thread would land after
+    # the assignment and overwrite it with its own import failure. Passing
+    # alone and failing in the suite is the signature of exactly that.
+    monkeypatch.setattr(server, "_warm", lambda: None)
+    server._ready["model"] = False
+    server._ready["error"] = None
+
     with TestClient(server.app) as c:
         yield c
 
@@ -163,7 +180,7 @@ def test_closing_the_stream_closes_the_agent_generator():
     _SCRIPT.extend([{"type": "answer_token", "text": f"tok{i}"} for i in range(50)])
 
     async def scenario():
-        stream = server._event_stream("any-session", "why")
+        stream = server._event_stream(server.agent_loop.run("any-session", "why"), "ask")
         first = await stream.__anext__()
         assert "tok0" in first
         await stream.aclose()
@@ -181,7 +198,8 @@ def test_normal_completion_also_closes_the_generator():
                     "latency_ms": 1, "stage_latencies": {}, "provider": "p"})
 
     async def scenario():
-        return [frame async for frame in server._event_stream("any-session", "why")]
+        return [frame async for frame in
+                server._event_stream(server.agent_loop.run("any-session", "why"), "ask")]
 
     frames = asyncio.run(scenario())
     assert len(frames) == 1
@@ -261,3 +279,46 @@ def test_a_failed_warmup_stays_unready_and_says_why(client):
     res = client.get("/api/ready")
     assert res.status_code == 503
     assert "no space left" in res.json()["error"]
+
+# --------------------------------------------------------------------------
+# Digging deeper
+# --------------------------------------------------------------------------
+
+def test_dig_streams_like_ask(client):
+    _SCRIPT.extend([
+        {"type": "dig_start", "query": "why", "opening": 6, "remaining_after": 8},
+        {"type": "answer_done", "answer": "more", "citations": [],
+         "latency_ms": 9, "stage_latencies": {}, "provider": "groq"},
+    ])
+    sid = _session(client)
+    res = client.post("/api/dig", json={"session_id": sid})
+
+    assert res.status_code == 200
+    assert res.headers["content-type"].startswith("text/event-stream")
+    events = _frames(res.text)
+    assert events[0]["type"] == "dig_start"
+    assert events[0]["remaining_after"] == 8
+
+
+def test_dig_rejects_an_unknown_session(client):
+    assert client.post("/api/dig", json={"session_id": "nope"}).status_code == 404
+
+
+def test_dig_takes_no_query(client):
+    # A dig continues the question already asked, using results that are
+    # already ranked and already stored. Accepting a new query here would make
+    # it a second search wearing a cheaper name.
+    sid = _session(client)
+    res = client.post("/api/dig", json={"session_id": sid, "query": "something else"})
+    assert res.status_code == 200          # the extra field is ignored, not honoured
+
+
+def test_dig_surfaces_nothing_left_as_an_event_not_a_500(client):
+    # "everything has been opened" is a normal outcome, and the client has
+    # already opened a stream by the time it is known.
+    _SCRIPT.append({"type": "error", "stage": "dig",
+                    "message": "every result from that search has already been opened"})
+    sid = _session(client)
+    events = _frames(client.post("/api/dig", json={"session_id": sid}).text)
+    assert events[0]["type"] == "error"
+    assert "already been opened" in events[0]["message"]

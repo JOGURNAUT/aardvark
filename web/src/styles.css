@@ -530,3 +530,19 @@ footer.note-foot {
 .note-body .rests { color: var(--faint); font-size: 14px; }
 .note-body .rank { font-family: var(--mono); font-size: 11px; color: var(--faint); }
 .note.weak { border: 1px solid var(--fail); background: transparent; }
+
+/* A button that reads as part of the sentence it sits in, because that is
+   where the offer belongs: next to the count of what was left unread. */
+.linkbtn {
+  background: none;
+  border: 0;
+  padding: 0;
+  font: inherit;
+  font-weight: 500;
+  color: var(--accent);
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.linkbtn:hover:not(:disabled) { color: var(--accent-hi); }
+.linkbtn:disabled { color: var(--faint); cursor: default; text-decoration: none; }

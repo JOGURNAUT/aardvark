@@ -118,12 +118,14 @@ def _cosine(a: np.ndarray, b: np.ndarray) -> np.ndarray:
     return b_norm @ a_norm
 
 
-def select(pages: list[FetchedPage], user_query: str,
-           max_snippets: int = MAX_SNIPPETS_PER_TURN,
-           token_budget: int = MAX_CONTEXT_TOKENS,
-           max_per_domain: int = 2) -> list[Snippet]:
-    """Rank snippets by similarity to user query, walk top-down picking
-    within token_budget and max_per_domain cap."""
+def score_snippets(pages: list[FetchedPage], user_query: str) -> list[Snippet]:
+    """Every snippet from every page, scored and ranked. No caps applied.
+
+    Split out of select() so a second batch of pages can be scored on the same
+    scale and merged with what a first batch produced. The scores are
+    comparable across calls because nothing here depends on the rest of the
+    batch: each snippet is scored against the query alone.
+    """
     snippets = _all_snippets_from_pages(pages)
     if not snippets:
         return []
@@ -143,13 +145,27 @@ def select(pages: list[FetchedPage], user_query: str,
         s.score = float(sc) * (0.7 + 0.3 * recency)
 
     snippets.sort(key=lambda s: s.score, reverse=True)   #rank descending
+    return snippets
 
-    #GREEDY WALK honoring domain cap + token budget
-    #key pattern: break on max_snippets (quota full), continue on cap/budget (smaller may still fit)
+
+def pack(snippets: list[Snippet],
+         max_snippets: int = MAX_SNIPPETS_PER_TURN,
+         token_budget: int = MAX_CONTEXT_TOKENS,
+         max_per_domain: int = 2) -> list[Snippet]:
+    """Greedy walk down a ranked list, honouring the domain cap and the budget.
+
+    The pattern that matters: break on max_snippets, because the quota is full
+    and nothing further down can change that; continue on the cap or the
+    budget, because a smaller snippet further down may still fit.
+
+    Sorts defensively rather than trusting the caller, since a caller that
+    merged two ranked lists is holding one that is no longer ranked.
+    """
+    ordered = sorted(snippets, key=lambda s: s.score, reverse=True)
     chosen: list[Snippet] = []
     per_domain: dict[str, int] = {}
     used_tokens = 0
-    for s in snippets:
+    for s in ordered:
         if len(chosen) >= max_snippets:
             break
         if per_domain.get(s.domain, 0) >= max_per_domain:
@@ -160,5 +176,14 @@ def select(pages: list[FetchedPage], user_query: str,
         chosen.append(s)
         per_domain[s.domain] = per_domain.get(s.domain, 0) + 1
         used_tokens += cost
-
     return chosen
+
+
+def select(pages: list[FetchedPage], user_query: str,
+           max_snippets: int = MAX_SNIPPETS_PER_TURN,
+           token_budget: int = MAX_CONTEXT_TOKENS,
+           max_per_domain: int = 2) -> list[Snippet]:
+    """Rank snippets by similarity to user query, walk top-down picking
+    within token_budget and max_per_domain cap."""
+    return pack(score_snippets(pages, user_query),
+                max_snippets, token_budget, max_per_domain)

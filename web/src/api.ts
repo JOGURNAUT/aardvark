@@ -47,10 +47,19 @@ export async function* ask(
   query: string,
   signal: AbortSignal,
 ): AsyncGenerator<AgentEvent> {
-  const res = await fetch("/api/ask", {
+  yield* stream("/api/ask", { session_id: sessionId, query }, signal);
+}
+
+/** The SSE framing, shared by every streaming endpoint. */
+async function* stream(
+  path: string,
+  body: Record<string, unknown>,
+  signal: AbortSignal,
+): AsyncGenerator<AgentEvent> {
+  const res = await fetch(path, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ session_id: sessionId, query }),
+    body: JSON.stringify(body),
     signal,
   });
 
@@ -98,4 +107,22 @@ export async function* ask(
     // abort instead of waiting for GC.
     reader.releaseLock();
   }
+}
+
+
+/**
+ * Opens the results the last turn never reached, and answers again.
+ *
+ * Deliberately sends no query. A dig continues the question already asked,
+ * over search results that are already ranked and already stored, so it costs
+ * a fetch and a re-rank rather than another search. Letting the caller pass a
+ * new question here would make it a second search wearing a cheaper name.
+ *
+ * Same wire format as ask(), so the caller feeds both into the same reducer.
+ */
+export async function* dig(
+  sessionId: string,
+  signal: AbortSignal,
+): AsyncGenerator<AgentEvent> {
+  yield* stream("/api/dig", { session_id: sessionId }, signal);
 }

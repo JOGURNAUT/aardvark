@@ -170,11 +170,16 @@ def _next(it: Iterator[dict]) -> object:
     return next(it, _DONE)
 
 
-async def _event_stream(session_id: str, query: str) -> AsyncIterator[str]:
+async def _event_stream(gen: Iterator[dict], label: str) -> AsyncIterator[str]:
+    """Drive a sync agent generator and frame it as SSE.
+
+    Takes the generator rather than the arguments to build one, so /api/ask and
+    /api/dig share the cancellation path and the logging instead of each
+    growing its own copy.
+    """
     t0 = time.time()
     completed = False
     events = 0
-    gen = agent_loop.run(session_id, query)
     try:
         while True:
             event = await anyio.to_thread.run_sync(_next, gen)
@@ -194,8 +199,8 @@ async def _event_stream(session_id: str, query: str) -> AsyncIterator[str]:
         # generator by hand instead of handing it to Starlette.
         gen.close()
         if not completed:
-            log.info("stream ended after %d events in %.1fs without answer_done",
-                     events, time.time() - t0)
+            log.info("%s ended after %d events in %.1fs without answer_done",
+                     label, events, time.time() - t0)
 
 
 @app.post("/api/ask")
@@ -203,13 +208,39 @@ def ask(body: AskRequest) -> StreamingResponse:
     if not db.get_session(body.session_id):
         raise HTTPException(status_code=404, detail="unknown session_id")
     return StreamingResponse(
-        _event_stream(body.session_id, body.query),
+        _event_stream(agent_loop.run(body.session_id, body.query), "ask"),
         media_type="text/event-stream",
         headers={
             "Cache-Control": "no-cache",
             "Connection": "keep-alive",
             # nginx and several Azure front ends buffer proxied responses by
             # default, which turns a token stream into one delivery at the end.
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+
+class DigRequest(BaseModel):
+    session_id: str
+
+
+@app.post("/api/dig")
+def dig(body: DigRequest) -> StreamingResponse:
+    """Open the results the last turn never reached, and answer again.
+
+    No query in the body on purpose: a dig continues the question that was
+    already asked, using search results that are already ranked and already
+    stored. Letting the client pass a new query here would make it a second
+    search wearing a cheaper name.
+    """
+    if not db.get_session(body.session_id):
+        raise HTTPException(status_code=404, detail="unknown session_id")
+    return StreamingResponse(
+        _event_stream(agent_loop.dig(body.session_id), "dig"),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
             "X-Accel-Buffering": "no",
         },
     )
