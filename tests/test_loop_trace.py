@@ -14,6 +14,7 @@ stubbed before agent.loop is imported.
 from __future__ import annotations
 
 import importlib.util
+import pathlib
 import sys
 import types
 from dataclasses import dataclass
@@ -55,7 +56,25 @@ if "google.genai" not in sys.modules and importlib.util.find_spec("google.genai"
     sys.modules["google.genai"] = _gg
     sys.modules["google.genai.types"] = _gt
 
-from agent import loop                                          # noqa: E402
+# Load agent/loop.py from its path under a private name, rather than
+# `from agent import loop`.
+#
+# tests/test_api.py replaces sys.modules["agent.loop"] with a fake so it can
+# drive the SSE layer without an agent behind it, and pytest imports test
+# modules alphabetically, so test_api runs first and that fake is what
+# `from agent import loop` returns here. CI caught it; running these files in a
+# different order locally did not.
+#
+# Loading by path sidesteps the question entirely: this module gets the real
+# file whatever any other test has done to sys.modules, and puts nothing back
+# that could affect a later one.
+_spec = importlib.util.spec_from_file_location(
+    "_loop_under_test",
+    pathlib.Path(__file__).resolve().parent.parent / "agent" / "loop.py",
+)
+assert _spec and _spec.loader
+loop = importlib.util.module_from_spec(_spec)                   # noqa: E402
+_spec.loader.exec_module(loop)
 
 
 @dataclass
