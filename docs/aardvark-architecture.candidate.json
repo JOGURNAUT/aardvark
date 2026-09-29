@@ -1,0 +1,244 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "Aardvark — deep research agent",
+    "output": "docs/aardvark-architecture.html",
+    "quality_profile": "showcase",
+    "repository": {
+      "url": "https://github.com/JOGURNAUT/aardvark.git",
+      "provider": "github",
+      "link_mode": "web",
+      "revision": "63f19ba48fb2ed9b0ac6b7a8079493689689f6ed"
+    }
+  },
+  "components": [
+    {
+      "id": "user",
+      "type": "external",
+      "label": "Researcher",
+      "sublabel": "one question, then follow-ups",
+      "pos": [100, 60],
+      "size": [180, 62]
+    },
+    {
+      "id": "ui",
+      "type": "frontend",
+      "label": "React + TypeScript",
+      "sublabel": "SSE over fetch, not EventSource",
+      "tag": "AbortController",
+      "pos": [100, 190],
+      "size": [180, 70],
+      "sources": [
+        { "path": "web/src/api.ts", "line": 54, "end_line": 101, "label": "SSE framing" },
+        { "path": "web/src/App.tsx", "line": 700, "end_line": 780, "label": "event reducer" }
+      ]
+    },
+    {
+      "id": "api",
+      "type": "backend",
+      "label": "FastAPI",
+      "sublabel": "text/event-stream",
+      "pos": [100, 330],
+      "size": [180, 70],
+      "sources": [
+        { "path": "api/server.py", "line": 70, "label": "app" },
+        { "path": "api/server.py", "line": 207, "end_line": 232, "label": "ask and dig" }
+      ]
+    },
+    {
+      "id": "plan",
+      "type": "backend",
+      "label": "plan",
+      "sublabel": "question to sub-queries",
+      "pos": [100, 480],
+      "size": [180, 66],
+      "sources": [
+        { "path": "agent/planner.py", "line": 76, "label": "plan()" },
+        { "path": "agent/loop.py", "line": 141, "end_line": 180, "label": "stage order" }
+      ]
+    },
+    {
+      "id": "search",
+      "type": "backend",
+      "label": "search",
+      "sublabel": "de-duplicated by URL",
+      "pos": [390, 480],
+      "size": [190, 66],
+      "sources": [
+        { "path": "tools/search.py", "line": 35, "label": "search()" },
+        { "path": "agent/loop.py", "line": 77, "end_line": 104, "label": "dedupe and attribute" }
+      ]
+    },
+    {
+      "id": "fetch",
+      "type": "backend",
+      "label": "fetch",
+      "sublabel": "6 pages at most, in parallel",
+      "pos": [650, 480],
+      "size": [180, 66],
+      "sources": [
+        { "path": "tools/fetch.py", "line": 75, "end_line": 90, "label": "thread pool" },
+        { "path": "config.py", "line": 24, "label": "MAX_PAGES_TO_FETCH" }
+      ]
+    },
+    {
+      "id": "tavily",
+      "type": "external",
+      "label": "Tavily",
+      "sublabel": "web search API",
+      "pos": [390, 320],
+      "size": [190, 62],
+      "sources": [
+        { "path": "tools/search.py", "line": 2, "end_line": 23, "label": "client" }
+      ]
+    },
+    {
+      "id": "web",
+      "type": "external",
+      "label": "The open web",
+      "sublabel": "refusals come from here",
+      "pos": [650, 320],
+      "size": [180, 62],
+      "sources": [
+        { "path": "tools/fetch.py", "line": 56, "end_line": 57, "label": "extraction" }
+      ]
+    },
+    {
+      "id": "select",
+      "type": "backend",
+      "label": "select",
+      "sublabel": "local MiniLM, packed to budget",
+      "pos": [100, 760],
+      "size": [180, 66],
+      "sources": [
+        { "path": "agent/selector.py", "line": 38, "label": "MiniLM singleton" },
+        { "path": "agent/selector.py", "line": 151, "end_line": 180, "label": "pack()" }
+      ]
+    },
+    {
+      "id": "answer",
+      "type": "backend",
+      "label": "answer",
+      "sublabel": "streams tokens out",
+      "pos": [390, 760],
+      "size": [190, 66],
+      "sources": [
+        { "path": "agent/loop.py", "line": 255, "end_line": 300, "label": "_answer()" }
+      ]
+    },
+    {
+      "id": "citations",
+      "type": "backend",
+      "label": "citation guard",
+      "sublabel": "markers mapped to snippets",
+      "tag": "no invented URLs",
+      "pos": [690, 760],
+      "size": [200, 66],
+      "sources": [
+        { "path": "agent/citations.py", "line": 23, "label": "extract_citations()" }
+      ]
+    },
+    {
+      "id": "llm",
+      "type": "backend",
+      "label": "LLM client",
+      "sublabel": "one ordered provider chain",
+      "pos": [390, 940],
+      "size": [200, 70],
+      "sources": [
+        { "path": "llm/client.py", "line": 66, "end_line": 117, "label": "complete()" },
+        { "path": "llm/client.py", "line": 77, "label": "provider order" }
+      ]
+    },
+    {
+      "id": "sqlite",
+      "type": "database",
+      "label": "SQLite",
+      "sublabel": "audit trail, unopened results",
+      "pos": [690, 940],
+      "size": [200, 70],
+      "sources": [
+        { "path": "storage/db.py", "line": 147, "end_line": 185, "label": "save_turn()" },
+        { "path": "storage/db.py", "line": 40, "end_line": 41, "label": "latency, pending columns" }
+      ]
+    },
+    {
+      "id": "groq",
+      "type": "cloud",
+      "label": "Groq",
+      "sublabel": "primary",
+      "pos": [310, 1120],
+      "size": [170, 62]
+    },
+    {
+      "id": "gemini",
+      "type": "cloud",
+      "label": "Gemini",
+      "sublabel": "fallback, and the eval judge",
+      "pos": [530, 1120],
+      "size": [190, 62]
+    }
+  ],
+  "boundaries": [
+    {
+      "kind": "region",
+      "label": "agent/loop.py — one Python generator, typed events",
+      "wraps": ["plan", "search", "fetch", "select", "answer"]
+    }
+  ],
+  "connections": [
+    { "id": "asks", "from": "user", "to": "ui", "label": "asks", "variant": "emphasis" },
+    { "id": "post-ask", "from": "ui", "to": "api", "label": "POST /api/ask", "variant": "emphasis" },
+    { "id": "drive", "from": "api", "to": "plan", "label": "drives the generator", "variant": "emphasis" },
+    { "id": "plan-search", "from": "plan", "to": "search", "variant": "emphasis" },
+    { "id": "search-fetch", "from": "search", "to": "fetch", "variant": "emphasis" },
+    { "id": "fetch-select", "from": "fetch", "to": "select", "variant": "emphasis" },
+    { "id": "select-answer", "from": "select", "to": "answer", "variant": "emphasis" },
+    { "id": "guard", "from": "answer", "to": "citations", "label": "after generation" },
+    { "id": "search-tavily", "from": "search", "to": "tavily", "label": "one call per sub-query", "fromSide": "top", "toSide": "bottom" },
+    { "id": "fetch-web", "from": "fetch", "to": "web", "label": "extract main text", "fromSide": "top", "toSide": "bottom" },
+    { "id": "plan-llm", "from": "plan", "to": "llm", "label": "sub-queries", "fromSide": "left", "toSide": "left" },
+    { "id": "answer-llm", "from": "answer", "to": "llm", "label": "stream tokens", "fromSide": "bottom", "toSide": "top" },
+    { "id": "llm-groq", "from": "llm", "to": "groq", "label": "primary" },
+    { "id": "llm-gemini", "from": "llm", "to": "gemini", "label": "on failure", "variant": "dashed" },
+    { "id": "persist", "from": "citations", "to": "sqlite", "label": "save the turn", "fromSide": "bottom", "toSide": "top" },
+    { "id": "dig", "from": "sqlite", "to": "fetch", "label": "dig() reopens what was skipped", "variant": "dashed", "fromSide": "right", "toSide": "right" }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "One generator",
+      "items": [
+        "The five stages are one Python generator yielding typed events",
+        "The server re-serialises them without translating, so a new event type reaches the browser unchanged",
+        "Three front ends drive the same loop: React, Streamlit, Gradio"
+      ]
+    },
+    {
+      "dot": "emerald",
+      "title": "What it will not do",
+      "items": [
+        "Citation markers are mapped back to snippets after generation, so the model can emit a number but not a URL",
+        "A marker pointing at nothing is stripped before the answer is shown"
+      ]
+    },
+    {
+      "dot": "amber",
+      "title": "Budgets, and what they leave behind",
+      "items": [
+        "At most 6 pages opened per turn, at most 2 per domain",
+        "Snippets packed under a token budget with the same per-domain cap",
+        "A page returning 200 with no extractable text is reported, not counted as read"
+      ]
+    },
+    {
+      "dot": "violet",
+      "title": "Continuing a turn",
+      "items": [
+        "Per-stage latency and the results the cap left unopened are stored with the turn",
+        "dig() reopens the next batch without searching again, then re-packs old and new snippets so the caps stay global"
+      ]
+    }
+  ]
+}

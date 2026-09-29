@@ -17,3 +17,12 @@ README.pdf
 # React front end
 web/node_modules/
 web/dist/
+
+# Archify receipts. Evidence from one run of the gates, not source: they name
+# absolute paths and a content hash, so they churn on every regeneration and
+# mean nothing on another machine. The candidate JSON and the rendered HTML are
+# what belong in the repository.
+docs/*.finalize.json
+docs/*.finalize-summary.json
+docs/*.delivery.json
+docs/*.browser-check.json
