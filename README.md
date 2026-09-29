@@ -433,9 +433,20 @@ accurate estimate.
 ### Results
 
 Headline numbers from a **15-question run**, taken before the two multi-turn
-questions were added. The dataset is now 17 questions across 6 categories, so these
-figures do not cover the multi-turn category. Re-run with `python eval/run_eval.py`
-to regenerate against the current set.
+questions were added, so they do not cover the multi-turn category.
+
+**Read these as indicative, not as measurements.** `eval/results/` is gitignored
+and that run was never committed, so the denominator behind each mean was not
+kept. Every run still on disk scored only a fraction of its applicable cases -
+7 of 14 citation-precision judgements on one, 2 of 14 on another - and a mean
+over an unrecorded denominator is the exact failure the coverage reporting above
+exists to prevent. They are left here rather than deleted because removing a
+number is not the same as correcting it; what is missing is stated instead.
+
+Regenerating them is not possible on the free tier: seventeen questions need
+roughly fifty judge calls against a cap of twenty a day. The smallest run that
+can finish complete is the three-question one above, and a small complete sample
+is worth more than this table.
 
 | Metric | Overall | Reading |
 |---|---|---|
