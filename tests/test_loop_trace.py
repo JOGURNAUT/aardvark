@@ -21,41 +21,6 @@ from dataclasses import dataclass
 
 import pytest
 
-# Stub what agent.loop pulls in transitively, but ONLY where the real thing is
-# not installed.
-#
-# The version of this that stubbed unconditionally worked here and would have
-# broken CI. pytest imports test modules alphabetically, this file sorts before
-# test_selector.py, and a stub left in sys.modules is what the next module
-# imports. So test_selector would have received a fake SentenceTransformer in
-# the one environment where the real one exists.
-_FAKE = {
-    "tavily": {"TavilyClient": object},
-    "trafilatura": {},
-    "tiktoken": {},
-    "sentence_transformers": {"SentenceTransformer": object},
-    "groq": {"Groq": object},
-}
-
-for _name, _attrs in _FAKE.items():
-    if _name in sys.modules or importlib.util.find_spec(_name) is not None:
-        continue                                   # the real package is available
-    _mod = types.ModuleType(_name)
-    for _k, _v in _attrs.items():
-        setattr(_mod, _k, _v)
-    sys.modules[_name] = _mod
-
-if "google.genai" not in sys.modules and importlib.util.find_spec("google.genai") is None:
-    _g = types.ModuleType("google")
-    _gg = types.ModuleType("google.genai")
-    _gg.Client = object                                        # type: ignore[attr-defined]
-    _gt = types.ModuleType("google.genai.types")
-    _gg.types = _gt                                            # type: ignore[attr-defined]
-    _g.genai = _gg                                             # type: ignore[attr-defined]
-    sys.modules.setdefault("google", _g)
-    sys.modules["google.genai"] = _gg
-    sys.modules["google.genai.types"] = _gt
-
 # Load agent/loop.py from its path under a private name, rather than
 # `from agent import loop`.
 #
