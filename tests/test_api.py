@@ -215,3 +215,49 @@ def test_session_roundtrip(client):
 
 def test_health(client):
     assert client.get("/api/health").json() == {"ok": True}
+
+# --------------------------------------------------------------------------
+# Liveness and readiness are different questions
+# --------------------------------------------------------------------------
+
+def test_health_is_green_before_the_model_is(client):
+    """Liveness must not wait for the model.
+
+    The embedding model is a lazy global loaded on first use, so warming it
+    takes tens of seconds. If liveness waited for that, the orchestrator would
+    restart a pod that is merely still starting, and a slow start would become
+    a crash loop.
+    """
+    server._ready["model"] = False
+    server._ready["error"] = None
+    assert client.get("/api/health").status_code == 200
+    assert client.get("/api/health").json() == {"ok": True}
+
+
+def test_ready_is_503_until_the_model_is_loaded(client):
+    # Without this the Service sends the first user a request that hangs on a
+    # model load. It is the failure the live deployment shows today: the first
+    # request after a cold start times out and the retry succeeds.
+    server._ready["model"] = False
+    server._ready["error"] = None
+    res = client.get("/api/ready")
+    assert res.status_code == 503
+    assert res.json()["ready"] is False
+
+
+def test_ready_turns_green_once_warm(client):
+    server._ready["model"] = True
+    server._ready["error"] = None
+    res = client.get("/api/ready")
+    assert res.status_code == 200
+    assert res.json()["ready"] is True
+
+
+def test_a_failed_warmup_stays_unready_and_says_why(client):
+    # A pod that will never be able to answer should not quietly sit in the
+    # Service. It should stay out of rotation with the reason attached.
+    server._ready["model"] = False
+    server._ready["error"] = "no space left on device"
+    res = client.get("/api/ready")
+    assert res.status_code == 503
+    assert "no space left" in res.json()["error"]

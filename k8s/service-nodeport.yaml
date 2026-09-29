@@ -1,0 +1,21 @@
+# Local only. Pairs with kind-cluster.yaml's port mapping so the app is on
+# http://localhost:8080 without holding a `kubectl port-forward` open, which
+# matters here because a port-forward dies when the pod it is attached to is
+# replaced, and watching a rollout is the whole point of running this locally.
+#
+# A real cluster fronts the ClusterIP Service in service.yaml with an Ingress
+# and does TLS there. NodePort is not that.
+
+apiVersion: v1
+kind: Service
+metadata:
+  name: aardvark-nodeport
+  labels: { app: aardvark }
+spec:
+  type: NodePort
+  selector: { app: aardvark }
+  ports:
+    - name: http
+      port: 80
+      targetPort: http
+      nodePort: 30080

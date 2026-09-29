@@ -1,0 +1,12 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: aardvark-config
+data:
+  # Everything here is non-secret and safe to read from `kubectl get cm -o yaml`.
+  # API keys live in the Secret, never here: a ConfigMap is plain text to
+  # anyone with read access to the namespace.
+  DB_PATH: "/app/data/research.db"
+  GROQ_MODEL: "llama-3.3-70b-versatile"
+  GEMINI_MODEL: "gemini-2.5-flash"
+  PYTHONUNBUFFERED: "1"

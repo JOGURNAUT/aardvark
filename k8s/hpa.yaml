@@ -1,0 +1,60 @@
+# NOT APPLIED. Read k8s/README.md before you apply this.
+#
+# Applying it today does not scale Aardvark, it breaks it. A second replica
+# answers follow-up questions with no memory of the conversation, because the
+# UI holds session state in the server process, and it cannot mount the
+# ReadWriteOnce volume the first replica is writing the chat history to.
+#
+# It is committed anyway for two reasons: the thresholds below are the
+# interesting part and they were chosen rather than copied, and it records
+# exactly what the application has to become before horizontal scaling is a
+# configuration change rather than a rewrite.
+#
+# What has to move first:
+#   1. Session state out of the process, into Redis or a signed cookie.
+#   2. Chat history out of SQLite, into Postgres.
+# Then: replicas > 1, RollingUpdate instead of Recreate, and this file applies.
+
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: aardvark
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: aardvark
+  minReplicas: 1
+  maxReplicas: 4
+
+  metrics:
+    # CPU, not requests-per-second. A research turn is 20 to 60 seconds and
+    # spends most of it waiting on someone else's API, so request rate says
+    # almost nothing about whether this pod is struggling. The CPU it does burn
+    # is the embedding pass, which is the part that actually saturates.
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 70
+
+  behavior:
+    scaleUp:
+      # No stabilisation window: a queue forming is worth reacting to at once.
+      stabilizationWindowSeconds: 0
+      policies:
+        - type: Pods
+          value: 2
+          periodSeconds: 60
+
+    scaleDown:
+      # Ten minutes, and the number comes from the workload rather than taste.
+      # A new pod pays a cold start: image pull, then the embedding model
+      # warmup that readiness gates on. Scaling down a pod that is about to be
+      # needed again buys back a little memory and costs a user thirty seconds.
+      stabilizationWindowSeconds: 600
+      policies:
+        - type: Pods
+          value: 1
+          periodSeconds: 120

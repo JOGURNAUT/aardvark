@@ -1,0 +1,14 @@
+# A one-node local cluster, enough to run everything in this directory.
+#
+# extraPortMappings puts the ingress port on localhost so the app is reachable
+# at http://localhost:8080 without a port-forward, which makes it easier to see
+# a rollout actually swapping pods under live traffic.
+
+kind: Cluster
+apiVersion: kind.x-k8s.io/v1alpha4
+nodes:
+  - role: control-plane
+    extraPortMappings:
+      - containerPort: 30080
+        hostPort: 8080
+        protocol: TCP

@@ -1,0 +1,19 @@
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: aardvark-data
+spec:
+  # ReadWriteOnce: one node may mount this for writing at a time.
+  #
+  # That is not a preference, it is what SQLite can survive. SQLite's locking
+  # is built on POSIX file locks, which are advisory and unreliable over NFS
+  # and most ReadWriteMany volumes, so two replicas writing the same database
+  # file corrupt it rather than contend for it.
+  #
+  # This single line is what forces `replicas: 1` and `strategy: Recreate` in
+  # deployment.yaml. Moving the chat history to Postgres would remove all
+  # three constraints at once.
+  accessModes: [ReadWriteOnce]
+  resources:
+    requests:
+      storage: 2Gi

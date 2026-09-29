@@ -1,0 +1,112 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: aardvark
+  labels: { app: aardvark }
+spec:
+  # ONE replica, and this is not laziness.
+  #
+  # Two things pin it here. The UI keeps session state in the server process,
+  # so a second replica answers a follow-up that it has no memory of. And the
+  # chat history is SQLite on a ReadWriteOnce volume, which one node can mount
+  # for writing at a time.
+  #
+  # hpa.yaml exists and is deliberately not applied. Both blockers are named in
+  # k8s/README.md with what would have to change first.
+  replicas: 1
+
+  # Recreate, not RollingUpdate.
+  #
+  # A rolling update starts the new pod before stopping the old one, and the
+  # PersistentVolumeClaim below is ReadWriteOnce: the new pod would sit in
+  # ContainerCreating forever waiting for a volume the old pod still holds,
+  # while the old pod waits to be told to stop. Recreate takes the brief
+  # downtime instead of deadlocking.
+  strategy:
+    type: Recreate
+
+  selector:
+    matchLabels: { app: aardvark }
+
+  template:
+    metadata:
+      labels: { app: aardvark }
+    spec:
+      terminationGracePeriodSeconds: 45   # a research turn can still be streaming
+
+      containers:
+        - name: aardvark
+          image: aardvark:local
+          imagePullPolicy: IfNotPresent
+
+          ports:
+            - name: http
+              containerPort: 8000
+
+          envFrom:
+            - configMapRef: { name: aardvark-config }
+            - secretRef: { name: aardvark-secrets }
+
+          # LIVENESS: is the process wedged?
+          #
+          # Points at /api/health, which answers as soon as HTTP is up and says
+          # nothing about the model. That is the point: gating liveness on the
+          # model would restart a pod that is merely still warming, and a
+          # twenty-second warmup would become a crash loop.
+          livenessProbe:
+            httpGet: { path: /api/health, port: http }
+            periodSeconds: 15
+            timeoutSeconds: 3
+            failureThreshold: 4
+
+          # READINESS: can this replica actually answer a question?
+          #
+          # /api/ready is 503 until the embedding model is loaded. Without this
+          # the Service sends the first user a request that hangs for twenty
+          # seconds on a model load, which is exactly what the Azure deployment
+          # does today: first request times out, second succeeds.
+          readinessProbe:
+            httpGet: { path: /api/ready, port: http }
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 2
+
+          # STARTUP: buys the warmup time without loosening liveness.
+          #
+          # While this is failing, the liveness probe is not running at all. 60
+          # x 5s = five minutes, which is generous on purpose: on a cold node
+          # the image is ~2.8 GB and the pull dominates.
+          startupProbe:
+            httpGet: { path: /api/health, port: http }
+            periodSeconds: 5
+            failureThreshold: 60
+
+          resources:
+            # requests decide scheduling, limits decide killing. The memory
+            # limit is what the container actually needs: torch plus a
+            # 384-dimension MiniLM is a little over 1 GB resident, and being
+            # OOMKilled mid-answer is worse than being slow.
+            requests: { cpu: "300m", memory: "1.5Gi" }
+            limits: { memory: "3Gi" }
+            # No CPU limit on purpose. A CPU limit throttles rather than kills,
+            # and throttling the embedding pass makes every answer slower for
+            # no benefit on a single-tenant node.
+
+          volumeMounts:
+            - name: data
+              mountPath: /app/data       # DB_PATH lives here
+
+      # securityContext is NOT set, and that is a decision rather than an omission.
+      #
+      # runAsNonRoot would be correct, and it breaks this image today: the
+      # embedding model is baked in at build time into root's Hugging Face
+      # cache, so a container running as uid 1000 cannot find it and tries to
+      # download 80 MB on every cold start. Fixing it properly means setting
+      # HF_HOME to a world-readable path in the Dockerfile and baking the model
+      # there, then adding runAsNonRoot, runAsUser and fsGroup here. Adding the
+      # securityContext first would just move the failure.
+
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: aardvark-data

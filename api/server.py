@@ -48,6 +48,7 @@ from __future__ import annotations
 
 import json
 import logging
+import threading
 import time
 from pathlib import Path
 
@@ -57,7 +58,7 @@ import anyio
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse, FileResponse
+from fastapi.responses import StreamingResponse, FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
@@ -78,9 +79,35 @@ app.add_middleware(
 )
 
 
+# Liveness and readiness are different questions and this app is a good example
+# of why. The embedding model is a lazy global in agent/selector.py, loaded on
+# first use inside the select stage, so a container that has started is not a
+# container that can answer: the first real query pays a ten-to-twenty second
+# model load. On Azure that shows up as the first request timing out and the
+# second succeeding.
+#
+# So the process starts, says it is alive immediately, and warms the model on a
+# background thread. /api/ready only goes green once that finishes, which is
+# what an orchestrator should gate traffic on.
+_ready: dict[str, object] = {"model": False, "error": None}
+
+
+def _warm() -> None:
+    try:
+        from agent import selector
+        selector._embedder()
+        _ready["model"] = True
+        log.info("embedding model warm")
+    except Exception as e:                      # noqa: BLE001
+        _ready["error"] = str(e)
+        log.exception("warmup failed")
+
+
 @app.on_event("startup")
 def _startup() -> None:
     db.init_db()
+    # Daemon, so a warmup still running does not hold up a shutdown.
+    threading.Thread(target=_warm, name="warmup", daemon=True).start()
 
 
 # ---------------------------------------------------------------------------
@@ -190,7 +217,25 @@ def ask(body: AskRequest) -> StreamingResponse:
 
 @app.get("/api/health")
 def health() -> dict:
+    """Liveness: the process is running and can serve HTTP. Deliberately does
+    not check the model, because restarting a pod that is merely still warming
+    up turns a slow start into a crash loop."""
     return {"ok": True}
+
+
+@app.get("/api/ready")
+def ready() -> JSONResponse:
+    """Readiness: this replica can actually answer a research question.
+
+    503 until the embedding model is loaded, so an orchestrator holds traffic
+    back rather than sending the first user a request that will hang on a model
+    download. A warmup that failed stays 503 and says why.
+    """
+    ok = bool(_ready["model"])
+    return JSONResponse(
+        status_code=200 if ok else 503,
+        content={"ready": ok, "model": _ready["model"], "error": _ready["error"]},
+    )
 
 
 # ---------------------------------------------------------------------------

@@ -1,0 +1,26 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: aardvark
+  labels: { app: aardvark }
+spec:
+  type: ClusterIP
+  selector: { app: aardvark }
+  ports:
+    - name: http
+      port: 80
+      targetPort: http
+
+  # Sticky sessions, keyed on client IP.
+  #
+  # Pointless at one replica and load-bearing the moment there is more than
+  # one, because the UI's session lives in whichever server process created it.
+  # It is here so the reason is recorded, not because it is doing work today.
+  #
+  # It is also not a fix. ClientIP affinity breaks behind a NAT or a proxy that
+  # rewrites the source address, and it pins a user to a pod that may be
+  # rescheduled. The real fix is moving session state out of the process.
+  sessionAffinity: ClientIP
+  sessionAffinityConfig:
+    clientIP:
+      timeoutSeconds: 10800     # 3h, comfortably longer than a sitting
