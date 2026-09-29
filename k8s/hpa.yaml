@@ -1,19 +1,22 @@
-# NOT APPLIED. Read k8s/README.md before you apply this.
+# NOT APPLIED, and the reason is narrower than "it would break".
 #
-# Applying it today does not scale Aardvark, it breaks it. A second replica
-# answers follow-up questions with no memory of the conversation, because the
-# UI holds session state in the server process, and it cannot mount the
-# ReadWriteOnce volume the first replica is writing the chat history to.
+# Scaling to two pods on one node works: measured, both serve, both read the
+# same SQLite file through the same ReadWriteOnce volume, 40 concurrent writes
+# with no lock errors. The application has no per-session memory to lose.
 #
-# It is committed anyway for two reasons: the thresholds below are the
-# interesting part and they were chosen rather than copied, and it records
-# exactly what the application has to become before horizontal scaling is a
-# configuration change rather than a rewrite.
+# What it cannot do is scale across NODES, which is the only kind of scaling
+# an HPA is for on a real cluster. A ReadWriteOnce volume is mountable by one
+# node at a time, so the second node's pod never schedules; giving it a
+# ReadWriteMany volume instead moves SQLite onto a network filesystem, where
+# its locking is advisory and two writers corrupt rather than contend.
 #
-# What has to move first:
-#   1. Session state out of the process, into Redis or a signed cookie.
-#   2. Chat history out of SQLite, into Postgres.
-# Then: replicas > 1, RollingUpdate instead of Recreate, and this file applies.
+# So this is one change away from being correct, not a rewrite:
+#   move the chat history from SQLite to Postgres.
+# Then the volume goes, replicas > 1 is safe on any topology, RollingUpdate
+# replaces Recreate, and this file applies unchanged.
+#
+# It is committed now because the thresholds below were chosen rather than
+# copied, and they are the part worth reviewing.
 
 apiVersion: autoscaling/v2
 kind: HorizontalPodAutoscaler

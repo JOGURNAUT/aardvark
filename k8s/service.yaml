@@ -11,16 +11,15 @@ spec:
       port: 80
       targetPort: http
 
-  # Sticky sessions, keyed on client IP.
+  # No sessionAffinity, deliberately.
   #
-  # Pointless at one replica and load-bearing the moment there is more than
-  # one, because the UI's session lives in whichever server process created it.
-  # It is here so the reason is recorded, not because it is doing work today.
+  # An earlier version of this file set ClientIP on the theory that a session
+  # lives in the process that created it. That is true of the Streamlit UI and
+  # false of the one actually served: the FastAPI path keeps nothing per-session
+  # in memory, the client holds the session id, and every turn is read back from
+  # SQLite. Verified by putting two pods behind this Service and creating 40
+  # sessions through it - both pods then read all 40.
   #
-  # It is also not a fix. ClientIP affinity breaks behind a NAT or a proxy that
-  # rewrites the source address, and it pins a user to a pod that may be
-  # rescheduled. The real fix is moving session state out of the process.
-  sessionAffinity: ClientIP
-  sessionAffinityConfig:
-    clientIP:
-      timeoutSeconds: 10800     # 3h, comfortably longer than a sitting
+  # Pinning users to pods for no reason costs real things: it unbalances load,
+  # it breaks behind a NAT that collapses many clients to one source address,
+  # and it makes a rescheduled pod look like a lost session.

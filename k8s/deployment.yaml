@@ -4,24 +4,34 @@ metadata:
   name: aardvark
   labels: { app: aardvark }
 spec:
-  # ONE replica, and this is not laziness.
+  # ONE replica, and the reason is narrower than it first looks.
   #
-  # Two things pin it here. The UI keeps session state in the server process,
-  # so a second replica answers a follow-up that it has no memory of. And the
-  # chat history is SQLite on a ReadWriteOnce volume, which one node can mount
-  # for writing at a time.
+  # The FastAPI path holds no per-session state in memory: the session id is a
+  # token the client keeps and every turn is read back from SQLite. So this is
+  # not a sticky-session problem. (The Streamlit UI in ui/app.py does keep
+  # state in the process, which is why it was always run at one replica, but
+  # it is no longer what the image starts.)
   #
-  # hpa.yaml exists and is deliberately not applied. Both blockers are named in
-  # k8s/README.md with what would have to change first.
+  # What actually pins it is the ReadWriteOnce volume below. Two pods on the
+  # SAME node share it happily - measured, 40 concurrent session writes through
+  # a Service in front of two pods, no lock errors and both pods reading all 40
+  # rows - because POSIX locks work correctly on a local filesystem. Two pods
+  # on DIFFERENT nodes cannot: the second will not schedule, and forcing it
+  # with a ReadWriteMany volume puts SQLite on a network filesystem, where its
+  # locking is advisory and unreliable.
+  #
+  # So one replica is not required for correctness on a single node. It is the
+  # honest default for a Deployment that must not silently spread.
   replicas: 1
 
   # Recreate, not RollingUpdate.
   #
-  # A rolling update starts the new pod before stopping the old one, and the
-  # PersistentVolumeClaim below is ReadWriteOnce: the new pod would sit in
-  # ContainerCreating forever waiting for a volume the old pod still holds,
-  # while the old pod waits to be told to stop. Recreate takes the brief
-  # downtime instead of deadlocking.
+  # On one node a rolling update would in fact work, since both pods can mount
+  # the same ReadWriteOnce volume. It is Recreate because the moment there is a
+  # second node the new pod can be scheduled away from the volume and sit in
+  # ContainerCreating waiting for one the outgoing pod still holds, while the
+  # outgoing pod waits to be told to stop. Choosing the behaviour that is
+  # correct on both topologies costs a few seconds of downtime per deploy.
   strategy:
     type: Recreate
 

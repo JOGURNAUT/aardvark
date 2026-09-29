@@ -51,31 +51,32 @@ loop.
 
 ## What blocks scaling
 
-Two things, both in the application rather than the manifests.
+One thing, and it is not the one this file first claimed.
 
-**Session state lives in the server process.** A second replica answers a
-follow-up question with no memory of the conversation it is following up on.
-`service.yaml` sets `sessionAffinity: ClientIP`, which is a mitigation and not
-a fix: it breaks behind a NAT or any proxy that rewrites the source address,
-and it pins a user to a pod that may be rescheduled underneath them.
+**It is not session state.** The FastAPI path keeps nothing per-session in
+memory: the client holds the session id and every turn is read back from
+SQLite. Two pods behind the Service, 40 sessions created through it, both pods
+then read all 40. The Streamlit UI in `ui/app.py` *does* keep state in the
+process, which is why it was always run at one replica, but it is no longer
+what the image starts. `service.yaml` had `sessionAffinity: ClientIP` on that
+mistaken basis and no longer does.
 
-**Chat history is SQLite on a ReadWriteOnce volume.** One node can mount that
-for writing at a time, which is what SQLite can survive: its locking is built
-on POSIX file locks, which are advisory and unreliable over shared filesystems,
-so two writers corrupt the database rather than contend for it.
+**It is the ReadWriteOnce volume.** Two pods on the same node share it without
+complaint, because POSIX locks work correctly on a local filesystem: the same
+40-write test produced no lock errors. Two pods on different nodes cannot. A
+ReadWriteOnce volume is mountable by one node at a time, so the second node's
+pod never schedules, and giving it a ReadWriteMany volume instead puts SQLite
+on a network filesystem, where its locking is advisory and two writers corrupt
+rather than contend.
 
-Those two facts produce every other constraint here. `replicas: 1`.
-`strategy: Recreate`, because a rolling update would deadlock waiting for a
-volume the outgoing pod still holds. `hpa.yaml` sitting unapplied.
+That is why `replicas: 1` and `strategy: Recreate` are here even though both
+are unnecessary on a single node. They are the behaviour that is correct on
+either topology, and a Deployment should not be one added node away from
+breaking.
 
-The order to fix them in:
-
-1. **Session state into Redis**, or a signed cookie. Unblocks `replicas > 1`.
-2. **Chat history into Postgres.** Unblocks `RollingUpdate` and the HPA.
-
-Neither is large. What is worth noticing is that both were reasonable
-single-replica decisions that only became visible as constraints when
-something asked for a second replica.
+**One change removes all of it:** move the chat history from SQLite to
+Postgres. Then the volume goes, `replicas > 1` is safe anywhere,
+`RollingUpdate` replaces `Recreate`, and `hpa.yaml` applies unchanged.
 
 ## What is deliberately not here
 
