@@ -546,3 +546,33 @@ footer.note-foot {
 }
 .linkbtn:hover:not(:disabled) { color: var(--accent-hi); }
 .linkbtn:disabled { color: var(--faint); cursor: default; text-decoration: none; }
+
+/* ------------------------------------------------------ the conversation */
+
+/* A past turn is context, not the subject. Quieter than the live one, and
+   without its trace: repeating five stages per turn would bury the answers. */
+.past {
+  padding-bottom: 32px;
+  margin-bottom: 32px;
+  border-bottom: 1px solid var(--line);
+}
+.past-q {
+  margin: 0 0 12px;
+  font-family: var(--serif);
+  font-weight: 400;
+  font-size: 30px;
+  line-height: 1.12;
+  color: var(--muted);
+}
+.past .answer { font-size: 19px; margin-top: 0; }
+.past-meta { margin-top: 12px; }
+
+.followup {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-top: 48px;
+  padding-top: 28px;
+  border-top: 1px solid var(--line);
+}
+.followup textarea { min-height: 72px; font-size: 19px; }

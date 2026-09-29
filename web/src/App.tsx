@@ -9,6 +9,17 @@ import type {
 
 type StageState = "idle" | "running" | "done";
 
+/** A finished question and its answer, kept so a follow-up has something to
+ *  follow. The backend already carries the conversation (rolling_summary and
+ *  prior_turns in loop.py); this is only what the page shows. */
+export interface Turn {
+  question: string;
+  answer: string;
+  citations: Citation[];
+  snippets: Snippet[];
+  latencyMs: number | null;
+}
+
 export interface RunState {
   stages: Record<Stage, StageState>;
   plan: string[];
@@ -213,7 +224,11 @@ export default function App() {
   const [busy, setBusy] = useState(false);
   const [started, setStarted] = useState(false);
   const [elapsed, setElapsed] = useState(0);
+  const [turns, setTurns] = useState<Turn[]>([]);
   const [bootError, setBootError] = useState<string | null>(null);
+  // The reducer's result is needed after the stream ends, and the `run` closed
+  // over by this callback is the one from before it started.
+  const runRef = useRef<RunState>(emptyRun());
   const abortRef = useRef<AbortController | null>(null);
 
   useEffect(() => {
@@ -247,8 +262,13 @@ export default function App() {
 
     try {
       for await (const ev of ask(sessionId, q, controller.signal)) {
-        setRun((r) => reduce(r, ev));
+        setRun((r) => {
+          const next = reduce(r, ev);
+          runRef.current = next;
+          return next;
+        });
       }
+      bank(q);
     } catch (e) {
       const stopped = e instanceof DOMException && e.name === "AbortError";
       setRun((r) => ({
@@ -261,6 +281,19 @@ export default function App() {
     }
   }, [sessionId, query, busy]);
 
+  const bank = useCallback((question: string, replaceLast = false) => {
+    const r = runRef.current;
+    if (!r.answer) return;
+    const turn: Turn = {
+      question,
+      answer: r.answer,
+      citations: r.citations,
+      snippets: r.snippets,
+      latencyMs: r.latencyMs,
+    };
+    setTurns((t) => (replaceLast && t.length ? [...t.slice(0, -1), turn] : [...t, turn]));
+  }, []);
+
   const runDig = useCallback(async () => {
     if (!sessionId || busy) return;
     const controller = new AbortController();
@@ -269,8 +302,15 @@ export default function App() {
     setElapsed(0);
     try {
       for await (const ev of dig(sessionId, controller.signal)) {
-        setRun((r) => reduce(r, ev));
+        setRun((r) => {
+          const next = reduce(r, ev);
+          runRef.current = next;
+          return next;
+        });
       }
+      // A dig replaces the answer to the same question rather than adding a
+      // new one, so it rewrites the last turn instead of appending.
+      bank(asked, true);
     } catch (e) {
       const stopped = e instanceof DOMException && e.name === "AbortError";
       setRun((r) => ({
@@ -288,6 +328,8 @@ export default function App() {
     setStarted(false);
     setAsked("");
     setQuery("");
+    setTurns([]);
+    runRef.current = emptyRun();
     setRun(emptyRun());
   };
 
@@ -366,6 +408,10 @@ export default function App() {
           </main>
         ) : (
           <main>
+            {turns.slice(0, -1).map((t, i) => (
+              <PastTurn key={i} turn={t} />
+            ))}
+
             <section className="question">
               <div className="eyebrow">Question</div>
               <h1>{asked}</h1>
@@ -425,6 +471,31 @@ export default function App() {
               <ErrorBoundary label="evidence">
                 <Evidence snippets={run.snippets} />
               </ErrorBoundary>
+            )}
+
+            {run.latencyMs !== null && !busy && (
+              <section className="followup">
+                <label className="eyebrow" htmlFor="fu">Ask a follow-up</label>
+                <textarea
+                  id="fu"
+                  rows={2}
+                  value={query}
+                  placeholder="Pronouns are fine. It keeps the conversation."
+                  onChange={(e) => setQuery(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) void submit();
+                  }}
+                />
+                <div className="field-foot">
+                  <span className="mono">
+                    the earlier turns go with it, so it can resolve what "it" means
+                  </span>
+                  <button className="pill" onClick={() => void submit()}
+                          disabled={!query.trim()}>
+                    Ask
+                  </button>
+                </div>
+              </section>
             )}
 
             {run.latencyMs !== null && (
@@ -585,6 +656,27 @@ export function WeakEvidence({ snippets }: { snippets: Snippet[] }) {
         </p>
       </div>
     </div>
+  );
+}
+
+/**
+ * A finished question and answer, above the live one.
+ *
+ * Kept deliberately plain: no trace, no evidence list. The trace belongs to
+ * the turn being worked on, and repeating it for every past turn would bury
+ * the answer the reader came back for.
+ */
+export function PastTurn({ turn }: { turn: Turn }) {
+  return (
+    <section className="past">
+      <h2 className="past-q">{turn.question}</h2>
+      <AnswerText text={turn.answer} citations={turn.citations} streaming={false} />
+      {turn.latencyMs != null && (
+        <div className="mono past-meta">
+          {(turn.latencyMs / 1000).toFixed(1)} s · {turn.citations.length} cited
+        </div>
+      )}
+    </section>
   );
 }
 

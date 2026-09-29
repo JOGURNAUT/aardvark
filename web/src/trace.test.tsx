@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
-import { FetchNote, WeakEvidence, reduce } from "./App";
+import { FetchNote, PastTurn, WeakEvidence, reduce } from "./App";
 import type { RunState } from "./App";
 import type { AgentEvent, FetchedPage, Snippet } from "./types";
 
@@ -292,5 +292,47 @@ describe("dig", () => {
     const r = reduce(started, { type: "dig_start", query: "q", opening: 6, remaining_after: 8 });
     expect(r.pages).toEqual([]);
     expect(r.answer).toBe("");
+  });
+});
+
+// ------------------------------------------------------- the conversation
+
+describe("PastTurn", () => {
+  const turn = {
+    question: "Who is the current CEO of OpenAI?",
+    answer: "Sam Altman [1] returned in November 2023 [2].",
+    citations: [
+      { marker: 1, url: "https://a.com/x", title: "A", domain: "a.com" },
+      { marker: 2, url: "https://b.com/y", title: "B", domain: "b.com" },
+    ],
+    snippets: [],
+    latencyMs: 21400,
+  };
+
+  it("renders the question and its answer", () => {
+    const html = renderToStaticMarkup(<PastTurn turn={turn} />);
+    expect(html).toContain("Who is the current CEO of OpenAI?");
+    expect(html).toContain("Sam Altman");
+  });
+
+  it("keeps the citation links live in a past answer", () => {
+    // A follow-up is where someone goes back to check the first answer, so its
+    // citations have to still resolve.
+    const html = renderToStaticMarkup(<PastTurn turn={turn} />);
+    expect(html).toContain('href="#ev-1"');
+    expect(html).toContain('href="#ev-2"');
+  });
+
+  it("shows no trace, because the trace belongs to the live turn", () => {
+    // Repeating five stages and an evidence table per past turn would bury the
+    // answers the reader came back for.
+    const html = renderToStaticMarkup(<PastTurn turn={turn} />);
+    expect(html).not.toContain("digging in");
+    expect(html).not.toContain("Evidence");
+  });
+
+  it("does not render a latency it does not have", () => {
+    const html = renderToStaticMarkup(<PastTurn turn={{ ...turn, latencyMs: null }} />);
+    expect(html).not.toContain("s ·");
   });
 });
