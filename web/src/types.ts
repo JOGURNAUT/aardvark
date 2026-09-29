@@ -12,9 +12,28 @@ export interface PlanEvent {
   strategy: string;
 }
 
+export interface SearchResult {
+  url: string;
+  title: string;
+  domain?: string;
+  score?: number | null;
+  rank?: number;
+  found_by?: string[];
+  snippet?: string;
+}
+
+export interface QueryStat {
+  query: string;
+  results: number;
+  new: number;
+}
+
 export interface SearchDoneEvent {
   type: "search_done";
-  results: { url: string; title: string; score?: number | null }[];
+  results: SearchResult[];
+  // Per sub-question, so one that returned nothing is visible instead of
+  // being averaged into the total.
+  queries?: QueryStat[];
 }
 
 export interface FetchedPage {
@@ -23,11 +42,36 @@ export interface FetchedPage {
   domain: string;
   ok?: boolean;
   chars?: number;
+  // Position in the search ranking. A refusal from the top result and one from
+  // the twentieth are different events and this is what separates them.
+  rank?: number;
+  error?: string | null;
+  found_by?: string[];
+}
+
+export interface SkippedResult {
+  url: string;
+  domain: string;
+  rank?: number;
+  reason: string;
+}
+
+export interface TermCoverage {
+  term: string;
+  pages: number;
+  hits: number;
+  of_pages: number;
 }
 
 export interface FetchDoneEvent {
   type: "fetch_done";
   pages: FetchedPage[];
+  // How many results existed before the page cap and the per-domain rule cut
+  // it down, and what was left behind with the reason.
+  considered?: number;
+  skipped?: SkippedResult[];
+  // Which words of the question appear in the text that could be read.
+  term_coverage?: TermCoverage[];
 }
 
 export interface Snippet {

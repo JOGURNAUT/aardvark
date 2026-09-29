@@ -2,16 +2,23 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { ask, createSession } from "./api";
 import { ErrorBoundary } from "./ErrorBoundary";
 import { STAGES } from "./types";
-import type { AgentEvent, Citation, FetchedPage, Snippet, Stage } from "./types";
+import type {
+  AgentEvent, Citation, FetchedPage, QueryStat, Snippet,
+  SkippedResult, Stage, TermCoverage,
+} from "./types";
 
 type StageState = "idle" | "running" | "done";
 
-interface RunState {
+export interface RunState {
   stages: Record<Stage, StageState>;
   plan: string[];
   strategy: string;
   searchResults: number;
+  searchQueries: QueryStat[];
   pages: FetchedPage[];
+  considered: number;
+  skipped: SkippedResult[];
+  termCoverage: TermCoverage[];
   pagesFetched: number;
   snippets: Snippet[];
   answer: string;
@@ -27,7 +34,11 @@ const emptyRun = (): RunState => ({
   plan: [],
   strategy: "",
   searchResults: 0,
+  searchQueries: [],
   pages: [],
+  considered: 0,
+  skipped: [],
+  termCoverage: [],
   pagesFetched: 0,
   snippets: [],
   answer: "",
@@ -373,6 +384,7 @@ export default function App() {
 
             {run.answer && (
               <ErrorBoundary label="answer">
+                <WeakEvidence snippets={run.snippets} />
                 <section aria-labelledby="answer-h">
                   <div className="answer-head">
                     <h2 id="answer-h">Answer</h2>
@@ -417,6 +429,130 @@ export default function App() {
  * "hollow", which is derived here rather than reported, because the server
  * sends `ok` and `chars` separately and neither alone says it.
  */
+/**
+ * What the fetch stage could not do, in the order it matters.
+ *
+ * The version this replaces led with the count of dry pages and rendered
+ * whenever anything had gone wrong, so a run with three refusals and no dry
+ * pages announced "0 of 6 pages were dry digs". It also never mentioned the
+ * results that were never opened at all, which on the run that prompted this
+ * was fourteen of twenty.
+ *
+ * Every sentence is emitted only when its own count is non-zero, and the
+ * refusals carry their search rank, because a refusal from the top result and
+ * one from the twentieth are not the same event.
+ */
+export function FetchNote({ run, dry, failed }:
+                   { run: RunState; dry: FetchedPage[]; failed: FetchedPage[] }) {
+  const readable = run.pages.length - dry.length - failed.length;
+  const unopened = Math.max(0, run.considered - run.pages.length);
+  const topBlocked = [...failed].sort((a, b) => (a.rank ?? 99) - (b.rank ?? 99))[0];
+  const missing = run.termCoverage.filter((t) => t.pages === 0 && t.of_pages > 0);
+
+  if (!dry.length && !failed.length && !unopened && !missing.length) return null;
+
+  return (
+    <div className="note">
+      <svg width="16" height="16" viewBox="0 0 18 18" fill="none" aria-hidden="true">
+        <circle cx="9" cy="9" r="7" stroke="#C6E15B" strokeWidth="2" />
+      </svg>
+      <div className="note-body">
+        {missing.length > 0 && (
+          <p>
+            <strong>
+              {missing.map((t) => `"${t.term}"`).join(" and ")} appears nowhere in
+              the {missing[0].of_pages} page{missing[0].of_pages === 1 ? "" : "s"} that
+              could be read.
+            </strong>{" "}
+            Everything below matched on the other words only, so read it as a
+            near miss rather than an answer.
+          </p>
+        )}
+
+        {failed.length > 0 && (
+          <p>
+            <strong>
+              {failed.length} page{failed.length === 1 ? "" : "s"} refused the request
+            </strong>
+            {": "}
+            {failed.map((p, i) => (
+              <span key={p.url}>
+                {i > 0 && ", "}
+                <a href={p.url} target="_blank" rel="noreferrer">{p.domain || p.url}</a>
+                {p.rank != null && <span className="rank"> #{p.rank}</span>}
+              </span>
+            ))}
+            {topBlocked?.rank != null && topBlocked.rank <= 3 && (
+              <>
+                {" "}
+                <strong>One was search result #{topBlocked.rank}</strong>, so the
+                page most likely to hold the answer is the one that could not be
+                read. The link above opens it directly.
+              </>
+            )}
+          </p>
+        )}
+
+        {dry.length > 0 && (
+          <p>
+            <strong>{dry.length} page{dry.length === 1 ? "" : "s"} came back dry</strong>
+            {" — loaded, but gave up no readable text: "}
+            {dry.map((p) => p.domain || p.url).join(", ")}.
+          </p>
+        )}
+
+        {unopened > 0 && (
+          <p>
+            <strong>{unopened} more results were never opened.</strong>{" "}
+            {run.skipped.some((k) => k.reason.includes("domain"))
+              ? "Some hit the two-per-domain rule; the rest hit the page cap."
+              : "They were past the page cap."}
+          </p>
+        )}
+
+        <p className="rests">
+          This answer rests on {readable} page{readable === 1 ? "" : "s"}.
+        </p>
+      </div>
+    </div>
+  );
+}
+
+// Below this, the best thing retrieved is not a match for the question, it is
+// merely the least bad thing available.
+const WEAK = 0.35;
+
+/**
+ * Says out loud when the evidence is thin.
+ *
+ * The selector has no score floor: it keeps the top N whatever they scored. So
+ * a question with no good match still produces a full-looking evidence list,
+ * and the page reads exactly as confidently whether the best snippet scored
+ * 0.9 or 0.07.
+ */
+export function WeakEvidence({ snippets }: { snippets: Snippet[] }) {
+  const scored = snippets.map((s) => s.score).filter((x): x is number => x != null);
+  if (!scored.length) return null;
+  const top = Math.max(...scored);
+  if (top >= WEAK) return null;
+
+  return (
+    <div className="note weak">
+      <svg width="16" height="16" viewBox="0 0 18 18" fill="none" aria-hidden="true">
+        <path d="M9 3 L16 15 H2 Z" stroke="#F07A93" strokeWidth="1.8" />
+      </svg>
+      <div className="note-body">
+        <p>
+          <strong>Best snippet scored {top.toFixed(2)}.</strong> Nothing retrieved
+          is a close match for the question, so this answer is built on weak
+          evidence. The selector keeps the best it has; it does not require the
+          best to be good.
+        </p>
+      </div>
+    </div>
+  );
+}
+
 function Trace({ run }: { run: RunState }) {
   const dry = run.pages.filter((p) => kindOf(p) === "dry");
   const failed = run.pages.filter((p) => kindOf(p) === "failed");
@@ -468,10 +604,21 @@ function Trace({ run }: { run: RunState }) {
                 </ol>
               )}
 
-              {s === "search" && run.searchResults > 0 && (
-                <div className="qrow">
-                  <span>{run.searchResults} unique results</span>
-                  <span className="mono">de-duplicated by URL</span>
+              {s === "search" && run.searchQueries.length > 0 && (
+                <div className="qtable">
+                  {run.searchQueries.map((q) => (
+                    <div className={q.results === 0 ? "qline empty" : "qline"} key={q.query}>
+                      <span className="q">{q.query}</span>
+                      <span className="n">
+                        {q.results === 0
+                          ? "nothing"
+                          : `${q.results} results · ${q.new} new`}
+                      </span>
+                    </div>
+                  ))}
+                  <div className="qline total">
+                    <span className="q">{run.searchResults} unique after de-duplicating by URL</span>
+                  </div>
                 </div>
               )}
 
@@ -512,23 +659,7 @@ function Trace({ run }: { run: RunState }) {
                     })}
                   </div>
 
-                  {(dry.length > 0 || failed.length > 0) && (
-                    <div className="note">
-                      <svg width="16" height="16" viewBox="0 0 18 18" fill="none" aria-hidden="true">
-                        <circle cx="9" cy="9" r="7" stroke="#C6E15B" strokeWidth="2" />
-                      </svg>
-                      <p>
-                        <strong>
-                          {dry.length} of {run.pages.length} pages were dry digs
-                        </strong>
-                        {" — they loaded, but gave up no readable text"}
-                        {dry.length > 0 && `: ${dry.map((p) => p.domain || p.url).join(", ")}`}
-                        {failed.length > 0 &&
-                          `. ${failed.length} more refused the request: ${failed.map((p) => p.domain || p.url).join(", ")}`}
-                        {`. This answer rests on the other ${run.pages.length - dry.length - failed.length} pages.`}
-                      </p>
-                    </div>
-                  )}
+                  <FetchNote run={run} dry={dry} failed={failed} />
                 </>
               )}
 
@@ -582,6 +713,7 @@ export function reduce(r: RunState, ev: AgentEvent): RunState {
       return {
         ...r,
         searchResults: ev.results.length,
+        searchQueries: ev.queries ?? [],
         stages: { ...r.stages, search: "done", fetch: "running" },
       };
     case "fetch_done":
@@ -589,6 +721,9 @@ export function reduce(r: RunState, ev: AgentEvent): RunState {
         ...r,
         pages: ev.pages,
         pagesFetched: ev.pages.length,
+        considered: ev.considered ?? ev.pages.length,
+        skipped: ev.skipped ?? [],
+        termCoverage: ev.term_coverage ?? [],
         stages: { ...r.stages, fetch: "done", select: "running" },
       };
     case "select_done":

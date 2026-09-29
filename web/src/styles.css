@@ -502,3 +502,31 @@ footer.note-foot {
 @media (prefers-reduced-motion: reduce) {
   *, *::after { animation: none !important; }
 }
+
+/* ------------------------------------------------- per-query search table */
+
+.qtable { display: flex; flex-direction: column; }
+.qline {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--hairline);
+  font-family: var(--mono);
+  font-size: 13px;
+}
+.qline .q { color: var(--fg); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.qline .n { color: var(--faint); white-space: nowrap; }
+/* A sub-question that found nothing is the interesting row, not the quiet one. */
+.qline.empty .q { color: var(--faint); }
+.qline.empty .n { color: var(--fail); }
+.qline.total { border-bottom: 0; }
+.qline.total .q { color: var(--faint); }
+
+/* ------------------------------------------------------- the richer notes */
+
+.note-body { display: flex; flex-direction: column; gap: 8px; }
+.note-body p { margin: 0; font-size: 16px; line-height: 1.5; color: var(--fg-2); }
+.note-body .rests { color: var(--faint); font-size: 14px; }
+.note-body .rank { font-family: var(--mono); font-size: 11px; color: var(--faint); }
+.note.weak { border: 1px solid var(--fail); background: transparent; }
